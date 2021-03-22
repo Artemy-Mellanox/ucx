@@ -663,7 +663,8 @@ int main(int argc, char **argv)
         CHKERR_JUMP(0 != status, "EPs exchange", out_free_ep);
 
         /* Connect endpoint to a remote endpoint */
-        status = uct_ep_connect_to_ep(ep, peer_dev, peer_ep);
+        status = uct_ep_connect_to_ep(ep, peer_dev, peer_ep,
+                                      if_info.iface_attr.ep_addr_len);
         if (barrier(oob_sock)) {
             status = UCS_ERR_IO_ERROR;
             goto out_free_ep;

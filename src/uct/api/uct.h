@@ -2211,7 +2211,8 @@ ucs_status_t uct_ep_get_address(uct_ep_h ep, uct_ep_addr_t *addr);
  * @param [in] ep_addr      Remote endpoint address.
  */
 ucs_status_t uct_ep_connect_to_ep(uct_ep_h ep, const uct_device_addr_t *dev_addr,
-                                  const uct_ep_addr_t *ep_addr);
+                                  const uct_ep_addr_t *ep_addr,
+                                  size_t ep_addr_len);
 
 
 /**

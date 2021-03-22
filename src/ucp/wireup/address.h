@@ -84,6 +84,7 @@ struct ucp_address_iface_attr {
 typedef struct ucp_address_entry_ep_addr {
     ucp_lane_index_t            lane;         /* Lane index (local or remote) */
     const uct_ep_addr_t         *addr;        /* Pointer to ep address */
+    size_t                      len;          /* Size of ep address */
 } ucp_address_entry_ep_addr_t;
 
 /**

@@ -1057,6 +1057,7 @@ ucs_status_t ucp_address_unpack(ucp_worker_t *worker, const void *buffer,
                 ep_addr       = &address->ep_addrs[address->num_ep_addrs++];
                 ptr           = ucp_address_unpack_length(worker, flags_ptr, ptr,
                                                           &ep_addr_len, 1, NULL);
+                ep_addr->len  = ep_addr_len;
                 ep_addr->addr = ptr;
                 ptr           = UCS_PTR_BYTE_OFFSET(ptr, ep_addr_len);
 
