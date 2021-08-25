@@ -34,7 +34,12 @@ static ucs_status_t uct_knem_iface_query(uct_iface_h tl_iface,
     iface_attr->iface_addr_len      = 0;
     iface_attr->bandwidth.shared    = iface->super.super.config.bandwidth;
     iface_attr->bandwidth.dedicated = 0;
-    iface_attr->overhead            = 0.25e-6; /* 0.25 us */
+
+    if (ucs_arch_get_cpu_vendor() == UCS_CPU_VENDOR_FUJITSU_ARM) {
+        iface_attr->overhead        = 6e-6;
+    } else {
+        iface_attr->overhead        = 2e-6;
+    }
 
     return UCS_OK;
 }
