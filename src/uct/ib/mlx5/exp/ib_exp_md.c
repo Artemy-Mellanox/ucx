@@ -234,7 +234,7 @@ uct_ib_mlx5_exp_reg_indirect_mr(uct_ib_mlx5_md_t *md,
     struct ibv_wc wc;
     int ret;
 
-    if (md->umr_qp == NULL) {
+    if (md->umr.qp == NULL) {
         status = UCS_ERR_UNSUPPORTED;
         goto err;
     }
@@ -287,12 +287,12 @@ uct_ib_mlx5_exp_reg_indirect_mr(uct_ib_mlx5_md_t *md,
     }
 
     ucs_trace_data("UMR_FILL qp 0x%x lkey 0x%x base 0x%lx [addr %lx len %zu lkey 0x%x] list_size %d",
-                   md->umr_qp->qp_num, wr.ext_op.umr.modified_mr->lkey,
+                   md->umr.qp->qp_num, wr.ext_op.umr.modified_mr->lkey,
                    wr.ext_op.umr.base_addr, mem_reg[0].base_addr,
                    mem_reg[0].length, mem_reg[0].mr->lkey, list_size);
 
     /* Post UMR */
-    ret = ibv_exp_post_send(md->umr_qp, &wr, &bad_wr);
+    ret = ibv_exp_post_send(md->umr.qp, &wr, &bad_wr);
     if (ret) {
         ucs_error("ibv_exp_post_send(UMR_FILL) failed: %m");
         status = UCS_ERR_IO_ERROR;
@@ -301,9 +301,9 @@ uct_ib_mlx5_exp_reg_indirect_mr(uct_ib_mlx5_md_t *md,
 
     /* Wait for send UMR completion */
     for (;;) {
-        ret = ibv_poll_cq(md->umr_cq, 1, &wc);
+        ret = ibv_poll_cq(md->umr.cq, 1, &wc);
         if (ret < 0) {
-            ucs_error("ibv_exp_poll_cq(umr_cq) failed: %m");
+            ucs_error("ibv_exp_poll_cq(umr.cq=%p) failed: %m", md->umr.cq);
             status = UCS_ERR_IO_ERROR;
             goto err_free_klm_container;
         }
@@ -727,11 +727,11 @@ void uct_ib_mlx5_exp_md_cleanup(uct_ib_md_t *ibmd)
 #ifdef HAVE_EXP_UMR
     uct_ib_mlx5_md_t *md = ucs_derived_of(ibmd, uct_ib_mlx5_md_t);
 
-    if (md->umr_qp != NULL) {
-        uct_ib_destroy_qp(md->umr_qp);
+    if (md->umr.qp != NULL) {
+        uct_ib_destroy_qp(md->umr.qp);
     }
-    if (md->umr_cq != NULL) {
-        ibv_destroy_cq(md->umr_cq);
+    if (md->umr.cq != NULL) {
+        ibv_destroy_cq(md->umr.cq);
     }
 #endif
 }

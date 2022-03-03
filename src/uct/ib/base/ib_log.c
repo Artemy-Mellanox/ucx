@@ -76,6 +76,7 @@ void uct_ib_log_dump_sg_list(uct_ib_iface_t *iface, uct_am_trace_type_t type,
     }
 
     if (data_dump) {
+        ucs_assert(iface != NULL);
         data_dump(&iface->super, type, data, total_len, total_valid_len, s, ends - s);
     }
 }

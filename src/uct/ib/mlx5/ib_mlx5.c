@@ -795,7 +795,7 @@ ucs_status_t uct_ib_mlx5_md_get_atomic_mr_id(uct_ib_md_t *ibmd, uint8_t *mr_id)
     uct_ib_mlx5_md_t *md = ucs_derived_of(ibmd, uct_ib_mlx5_md_t);
 
 #if HAVE_EXP_UMR
-    if ((md->umr_qp == NULL) || (md->umr_cq == NULL)) {
+    if ((md->umr.qp.ibv == NULL) || (md->umr.cq.ibv == NULL)) {
         goto unsupported;
     }
 #else
