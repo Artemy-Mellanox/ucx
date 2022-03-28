@@ -357,7 +357,6 @@ void uct_ib_mlx5_check_completion(uct_ib_iface_t *iface, uct_ib_mlx5_cq_t *cq,
     case MLX5_CQE_REQ_ERR:
         /* update ci before invoking error callback, since it can poll on cq */
         UCS_STATIC_ASSERT(MLX5_CQE_REQ_ERR & (UCT_IB_MLX5_CQE_OP_OWN_ERR_MASK >> 4));
-        ++cq->cq_ci;
         status = uct_ib_mlx5_completion_with_err(iface, (void*)cqe, NULL,
                                                  UCS_LOG_LEVEL_DEBUG);
         iface->ops->handle_failure(iface, cqe, status);
@@ -365,7 +364,6 @@ void uct_ib_mlx5_check_completion(uct_ib_iface_t *iface, uct_ib_mlx5_cq_t *cq,
     case MLX5_CQE_RESP_ERR:
         /* Local side failure - treat as fatal */
         UCS_STATIC_ASSERT(MLX5_CQE_RESP_ERR & (UCT_IB_MLX5_CQE_OP_OWN_ERR_MASK >> 4));
-        ++cq->cq_ci;
         uct_ib_mlx5_completion_with_err(iface, (void*)cqe, NULL,
                                         UCS_LOG_LEVEL_FATAL);
         return;
@@ -911,8 +909,8 @@ void uct_ib_mlx5_txwq_validate_always(uct_ib_mlx5_txwq_t *wq, uint16_t num_bb,
     uint16_t hw_ci;
 
     /* num_bb must be non-zero and not larger than MAX_BB */
-    ucs_assertv((num_bb > 0) && (num_bb <= UCT_IB_MLX5_MAX_BB), "num_bb=%u",
-                num_bb);
+    //ucs_assertv((num_bb > 0) && (num_bb <= UCT_IB_MLX5_MAX_BB), "num_bb=%u",
+    //            num_bb);
 
     /* bb_max must be smaller than the full QP length */
     qp_length = UCS_PTR_BYTE_DIFF(wq->qstart, wq->qend) / MLX5_SEND_WQE_BB;

@@ -220,7 +220,10 @@ UCS_CLASS_DECLARE(uct_ep_t, uct_iface_h);
  * Active message handle table entry
  */
 typedef struct uct_am_handler {
-    uct_am_callback_t cb;
+    union {
+        uct_am_callback_t     cb;
+        uct_am_sig_callback_t cb_sig;
+    };
     void              *arg;
     uint32_t          flags;
 } uct_am_handler_t;
@@ -858,6 +861,7 @@ uct_iface_invoke_am(uct_base_iface_t *iface, uint8_t id, void *data,
     UCS_STATS_UPDATE_COUNTER(iface->stats, UCT_IFACE_STAT_RX_AM_BYTES, length);
 
     handler = &iface->am[id];
+    ucs_assert(!(handler->flags & UCT_CB_FLAG_SIG));
     status = handler->cb(handler->arg, data, length, flags);
     ucs_assertv((status == UCS_OK) ||
                 ((status == UCS_INPROGRESS) && (flags &

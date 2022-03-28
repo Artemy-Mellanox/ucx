@@ -538,6 +538,7 @@ out_mp_disabled:
 
 static ucs_status_t
 uct_rc_mlx5_iface_init_rx(uct_rc_iface_t *rc_iface,
+                          const uct_iface_params_t *params,
                           const uct_rc_iface_common_config_t *rc_config)
 {
     uct_rc_mlx5_iface_common_t *iface    = ucs_derived_of(rc_iface,
@@ -547,6 +548,14 @@ uct_rc_mlx5_iface_init_rx(uct_rc_iface_t *rc_iface,
     struct ibv_srq_init_attr_ex srq_attr = {};
     uct_ib_mlx5_srq_attr_t attr          = {};
     ucs_status_t status;
+
+    /* Create RX buffers mempool */
+    status = uct_ib_iface_recv_mpool_init(&iface->super.super,
+                                          &rc_config->super, params,
+                                          "rc_mlx5_recv_desc", &iface->rx.mp);
+    if (status != UCS_OK) {
+        return status;
+    }
 
     if (UCT_RC_MLX5_TM_ENABLED(iface)) {
         if (md->flags & UCT_IB_MLX5_MD_FLAG_DEVX_RC_SRQ) {
@@ -699,14 +708,6 @@ UCS_CLASS_INIT_FUNC(uct_rc_mlx5_iface_common_t, uct_iface_ops_t *tl_ops,
     self->tx.mmio_mode        = mlx5_config->super.mmio_mode;
     self->tx.bb_max           = ucs_min(mlx5_config->tx_max_bb, UINT16_MAX);
     self->tm.am_desc.super.cb = uct_ib_mlx5_release_desc;
-
-    /* Create RX buffers mempool */
-    status = uct_ib_iface_recv_mpool_init(&self->super.super,
-                                          &rc_config->super, params,
-                                          "rc_mlx5_recv_desc", &self->rx.mp);
-    if (status != UCS_OK) {
-        goto err;
-    }
 
     if (!UCT_RC_MLX5_MP_ENABLED(self)) {
         self->tm.am_desc.offset = self->super.super.config.rx_headroom_offset;

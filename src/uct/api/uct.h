@@ -564,7 +564,7 @@ enum uct_msg_flags {
  */
 enum uct_cb_flags {
     UCT_CB_FLAG_RESERVED = UCS_BIT(1), /**< Reserved for future use. */
-    UCT_CB_FLAG_ASYNC    = UCS_BIT(2)  /**< Callback is allowed to be called
+    UCT_CB_FLAG_ASYNC    = UCS_BIT(2), /**< Callback is allowed to be called
                                             from any thread in the process, and
                                             therefore should be thread-safe. For
                                             example, it may be called from a
@@ -579,6 +579,7 @@ enum uct_cb_flags {
                                             the callback will be invoked only
                                             from the context that called @ref
                                             uct_iface_progress). */
+    UCT_CB_FLAG_SIG      = UCS_BIT(3)
 };
 
 
@@ -662,7 +663,10 @@ enum uct_iface_params_field {
     UCT_IFACE_PARAM_FIELD_AM_ALIGNMENT       = UCS_BIT(16),
 
     /** Enables @ref uct_iface_params_t::am_align_offset */
-    UCT_IFACE_PARAM_FIELD_AM_ALIGN_OFFSET    = UCS_BIT(17)
+    UCT_IFACE_PARAM_FIELD_AM_ALIGN_OFFSET    = UCS_BIT(17),
+
+    /** Enables @ref uct_iface_params_t::sig */
+    UCT_IFACE_PARAM_FIELD_SIG                = UCS_BIT(18)
 };
 
 /**
@@ -757,6 +761,12 @@ typedef enum {
                                 memory mapping and to avoid page faults when
                                 the memory is accessed for the first time. */
 } uct_mem_advice_t;
+
+
+typedef enum {
+    UCT_SIG_T10DIF = 0,
+    UCT_SIG_LAST
+} uct_sig_type_t;
 
 
 /**
@@ -1133,6 +1143,11 @@ struct uct_iface_params {
      * +-------------------+
      */
     size_t                                       am_align_offset;
+
+    struct {
+        uct_sig_type_t                           type;
+        size_t                                   am_header_size;
+    } sig;
 };
 
 

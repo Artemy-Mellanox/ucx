@@ -61,7 +61,7 @@ ucp_eager_offload_handler(void *arg, void *data, size_t length,
     } else {
         status = ucp_recv_desc_init(worker, data, length, sizeof(ucp_tag_t),
                                     tl_flags, sizeof(ucp_tag_t), flags,
-                                    sizeof(ucp_tag_t), 1, name, &rdesc);
+                                    sizeof(ucp_tag_t), 1, name, &rdesc, NULL);
         if (!UCS_STATUS_IS_ERR(status)) {
             rdesc_hdr  = (ucp_tag_t*)(rdesc + 1);
             *rdesc_hdr = recv_tag;
@@ -125,7 +125,7 @@ ucp_eager_tagged_handler(void *arg, void *data, size_t length, unsigned am_flags
         status = UCS_OK;
     } else {
         status = ucp_recv_desc_init(worker, data, length, 0, am_flags, hdr_len,
-                                    flags, priv_length, 1, name, &rdesc);
+                                    flags, priv_length, 1, name, &rdesc, NULL);
         if (!UCS_STATUS_IS_ERR(status)) {
             ucp_tag_unexp_recv(&worker->tm, rdesc, eager_hdr->super.tag);
         }
@@ -182,7 +182,7 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_middle_handler,
         /* add new received descriptor to the queue */
         status = ucp_recv_desc_init(worker, data, length, 0, am_flags,
                                     sizeof(*hdr), UCP_RECV_DESC_FLAG_EAGER, 0,
-                                    1, "eager_middle_handler", &rdesc);
+                                    1, "eager_middle_handler", &rdesc, NULL);
         if (ucs_likely(!UCS_STATUS_IS_ERR(status))) {
             ucp_tag_frag_match_add_unexp(matchq, rdesc, hdr->offset);
         } else if (ucs_queue_is_empty(&matchq->unexp_q)) {
@@ -324,7 +324,7 @@ ucp_tag_offload_eager_first_handler(ucp_worker_h worker, void *data,
      */
     status = ucp_recv_desc_init(worker, data, length, priv_len,
                                 tl_flags, priv_len, flags, priv_len, 1,
-                                "eager_offload_first_handler", &rdesc);
+                                "eager_offload_first_handler", &rdesc, NULL);
     if (ucs_unlikely(UCS_STATUS_IS_ERR(status))) {
         return UCS_OK;
     }
@@ -402,7 +402,8 @@ ucp_tag_offload_eager_middle_handler(ucp_worker_h worker, void *data,
     if (ucp_tag_frag_match_is_unexp(matchq)) {
         status = ucp_recv_desc_init(worker, hdr, length + hdr_length, 0,
                                     tl_flags, hdr_length, flags, hdr_length, 1,
-                                    "tag_offload_eager_middle_handler", &rdesc);
+                                    "tag_offload_eager_middle_handler", &rdesc,
+                                    NULL);
         if (ucs_unlikely(UCS_STATUS_IS_ERR(status))) {
             return UCS_OK;
         }

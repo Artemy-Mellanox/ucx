@@ -241,6 +241,7 @@ static ucs_status_t uct_rc_verbs_iface_query(uct_iface_h tl_iface, uct_iface_att
 
 static ucs_status_t
 uct_rc_iface_verbs_init_rx(uct_rc_iface_t *rc_iface,
+                           const uct_iface_params_t *params,
                            const uct_rc_iface_common_config_t *config)
 {
     uct_rc_verbs_iface_t *iface = ucs_derived_of(rc_iface, uct_rc_verbs_iface_t);

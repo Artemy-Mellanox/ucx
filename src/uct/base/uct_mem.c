@@ -334,11 +334,12 @@ ucs_status_t uct_mem_free(const uct_allocated_memory_t *mem)
     }
 }
 
-ucs_status_t uct_iface_mem_alloc(uct_iface_h tl_iface, size_t length, unsigned flags,
-                                 const char *name, uct_allocated_memory_t *mem)
+ucs_status_t uct_mem_alloc_reg(uct_md_h md, size_t length, unsigned flags,
+                               unsigned num_alloc_methods,
+                               uct_alloc_method_t *alloc_methods,
+                               const char *name, uct_allocated_memory_t *mem)
 {
-    uct_base_iface_t *iface = ucs_derived_of(tl_iface, uct_base_iface_t);
-    void *address           = NULL;
+    void *address = NULL;
     uct_md_attr_t md_attr;
     ucs_status_t status;
     uct_mem_alloc_params_t params;
@@ -352,11 +353,10 @@ ucs_status_t uct_iface_mem_alloc(uct_iface_h tl_iface, size_t length, unsigned f
     params.name            = name;
     params.mem_type        = UCS_MEMORY_TYPE_HOST;
     params.address         = address;
-    params.mds.mds         = &iface->md;
+    params.mds.mds         = &md;
     params.mds.count       = 1;
 
-    status = uct_mem_alloc(length, iface->config.alloc_methods,
-                           iface->config.num_alloc_methods, &params, mem);
+    status = uct_mem_alloc(length, alloc_methods, num_alloc_methods, &params, mem);
     if (status != UCS_OK) {
         goto err;
     }
@@ -364,7 +364,7 @@ ucs_status_t uct_iface_mem_alloc(uct_iface_h tl_iface, size_t length, unsigned f
     /* If the memory was not allocated using MD, register it */
     if (mem->method != UCT_ALLOC_METHOD_MD) {
 
-        status = uct_md_query(iface->md, &md_attr);
+        status = uct_md_query(md, &md_attr);
         if (status != UCS_OK) {
             goto err_free;
         }
@@ -372,7 +372,7 @@ ucs_status_t uct_iface_mem_alloc(uct_iface_h tl_iface, size_t length, unsigned f
         /* If MD does not support registration, allow only the MD method */
         if ((md_attr.cap.flags & UCT_MD_FLAG_REG) &&
             (md_attr.cap.reg_mem_types & UCS_BIT(mem->mem_type))) {
-            status = uct_md_mem_reg(iface->md, mem->address, mem->length, flags,
+            status = uct_md_mem_reg(md, mem->address, mem->length, flags,
                                     &mem->memh);
             if (status != UCS_OK) {
                 goto err_free;
@@ -383,7 +383,7 @@ ucs_status_t uct_iface_mem_alloc(uct_iface_h tl_iface, size_t length, unsigned f
             mem->memh = UCT_MEM_HANDLE_NULL;
         }
 
-        mem->md = iface->md;
+        mem->md = md;
     }
 
     return UCS_OK;
@@ -392,6 +392,16 @@ err_free:
     uct_mem_free(mem);
 err:
     return status;
+}
+
+ucs_status_t uct_iface_mem_alloc(uct_iface_h tl_iface, size_t length, unsigned flags,
+                                 const char *name, uct_allocated_memory_t *mem)
+{
+    uct_base_iface_t *iface = ucs_derived_of(tl_iface, uct_base_iface_t);
+
+    return uct_mem_alloc_reg(iface->md, length, flags,
+                             iface->config.num_alloc_methods,
+                             iface->config.alloc_methods, name, mem);
 }
 
 void uct_iface_mem_free(const uct_allocated_memory_t *mem)

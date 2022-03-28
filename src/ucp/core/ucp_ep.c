@@ -73,6 +73,7 @@ typedef struct ucp_ep_discard_lanes_arg {
 
 extern const ucp_request_send_proto_t ucp_stream_am_proto;
 extern const ucp_request_send_proto_t ucp_am_proto;
+extern const ucp_request_send_proto_t ucp_am_proto_sig;
 extern const ucp_request_send_proto_t ucp_am_reply_proto;
 
 #ifdef ENABLE_STATS
@@ -2325,7 +2326,11 @@ ucs_status_t ucp_ep_config_init(ucp_worker_h worker, ucp_ep_config_t *config,
 
     config->rndv.rkey_ptr_dst_mds       = 0;
     config->stream.proto                = &ucp_stream_am_proto;
-    config->am_u.proto                  = &ucp_am_proto;
+    if (context->config.features & UCP_FEATURE_SIG) {
+        config->am_u.proto              = &ucp_am_proto_sig;
+    } else {
+        config->am_u.proto              = &ucp_am_proto;
+    }
     config->am_u.reply_proto            = &ucp_am_reply_proto;
 
     ucp_ep_config_init_short_thresh(&config->tag.offload.max_eager_short);

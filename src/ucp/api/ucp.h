@@ -149,8 +149,9 @@ enum ucp_feature {
     UCP_FEATURE_WAKEUP       = UCS_BIT(4),  /**< Request interrupt
                                                  notification support */
     UCP_FEATURE_STREAM       = UCS_BIT(5),  /**< Request stream support */
-    UCP_FEATURE_AM           = UCS_BIT(6)   /**< Request Active Message
+    UCP_FEATURE_AM           = UCS_BIT(6),  /**< Request Active Message
                                                  support */
+    UCP_FEATURE_SIG          = UCS_BIT(7)
 };
 
 
@@ -746,6 +747,8 @@ typedef enum {
  */
 typedef enum {
     UCP_AM_RECV_ATTR_FIELD_REPLY_EP    = UCS_BIT(0),  /**< reply_ep field */
+    UCP_AM_RECV_ATTR_FIELD_SIG         = UCS_BIT(1),  /**< sig field */
+    UCP_AM_RECV_ATTR_FIELD_DESC        = UCS_BIT(2),  /**< desc field */
 
     /**
      * Indicates that the data provided in @ref ucp_am_recv_callback_t callback
@@ -1822,6 +1825,16 @@ struct ucp_am_recv_param {
      * Endpoint, which can be used for the reply to this message.
      */
     ucp_ep_h           reply_ep;
+
+    /**
+     * Signatures.
+     */
+    void               *sig;
+
+    /**
+     * Descriptor to be passed to @ref ucp_am_data_release
+     */
+    void               *desc;
 };
 
 

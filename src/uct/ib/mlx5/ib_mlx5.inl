@@ -60,7 +60,7 @@ uct_ib_mlx5_update_db_cq_ci(uct_ib_mlx5_cq_t *cq)
 
 
 static UCS_F_ALWAYS_INLINE struct mlx5_cqe64*
-uct_ib_mlx5_poll_cq(uct_ib_iface_t *iface, uct_ib_mlx5_cq_t *cq)
+uct_ib_mlx5_peek_cq(uct_ib_mlx5_cq_t *cq, int *err_p)
 {
     struct mlx5_cqe64 *cqe;
     unsigned cqe_index;
@@ -72,17 +72,37 @@ uct_ib_mlx5_poll_cq(uct_ib_iface_t *iface, uct_ib_mlx5_cq_t *cq)
 
     if (ucs_unlikely(uct_ib_mlx5_cqe_is_hw_owned(op_own, cqe_index, cq->cq_length))) {
         return NULL;
-    } else if (ucs_unlikely(op_own & UCT_IB_MLX5_CQE_OP_OWN_ERR_MASK)) {
-        ucs_log_dump_hex_buf(cqe, sizeof(struct mlx5_cqe64));
-        UCS_STATIC_ASSERT(MLX5_CQE_INVALID & (UCT_IB_MLX5_CQE_OP_OWN_ERR_MASK >> 4));
-        ucs_assert((op_own >> 4) != MLX5_CQE_INVALID);
-        uct_ib_mlx5_check_completion(iface, cq, cqe);
-        uct_ib_mlx5_update_db_cq_ci(cq);
-        return NULL; /* No CQE */
     }
 
     ucs_log_dump_hex_buf(cqe, sizeof(struct mlx5_cqe64));
-    cq->cq_ci = cqe_index + 1;
+    if (ucs_unlikely(op_own & UCT_IB_MLX5_CQE_OP_OWN_ERR_MASK)) {
+        switch (op_own >> 4) {
+        case MLX5_CQE_INVALID:
+            ucs_fatal("CQE invalid");
+        case MLX5_CQE_RESP_ERR:
+        case MLX5_CQE_REQ_ERR:
+            ++cq->cq_ci;
+        }
+        uct_ib_mlx5_update_db_cq_ci(cq);
+        *err_p = 1;
+    } else {
+        cq->cq_ci = cqe_index + 1;
+    }
+
+    return cqe;
+}
+
+static UCS_F_ALWAYS_INLINE struct mlx5_cqe64*
+uct_ib_mlx5_poll_cq(uct_ib_iface_t *iface, uct_ib_mlx5_cq_t *cq)
+{
+    int err                = 0;
+    struct mlx5_cqe64 *cqe = uct_ib_mlx5_peek_cq(cq, &err);
+
+    if (err) {
+        uct_ib_mlx5_check_completion(iface, cq, cqe);
+        return NULL; /* No CQE */
+    }
+
     return cqe;
 }
 
@@ -230,6 +250,16 @@ uct_ib_mlx5_txwq_wrap_data(uct_ib_mlx5_txwq_t *txwq, void *data)
                                                             txwq->qend));
     }
     return data;
+}
+
+
+static UCS_F_ALWAYS_INLINE size_t
+uct_ib_mlx5_txwq_diff(uct_ib_mlx5_txwq_t *txwq, void *start, void *end)
+{
+    if (start < end) {
+        return UCS_PTR_BYTE_DIFF(start, end);
+    }
+    return UCS_PTR_BYTE_DIFF(start, end) + UCS_PTR_BYTE_DIFF(txwq->qstart, txwq->qend);
 }
 
 
@@ -484,12 +514,14 @@ uct_ib_mlx5_post_send(uct_ib_mlx5_txwq_t *wq, struct mlx5_wqe_ctrl_seg *ctrl,
     src = ctrl;
 
     ucs_log_dump_hex_buf(src, wqe_size);
-    ucs_assert(wqe_size <= UCT_IB_MLX5_BF_REG_SIZE);
-    ucs_assert(num_bb <= UCT_IB_MLX5_MAX_BB);
     if (ucs_likely(wq->reg->mode == UCT_IB_MLX5_MMIO_MODE_BF_POST)) {
+        ucs_assert(wqe_size <= UCT_IB_MLX5_BF_REG_SIZE);
+        ucs_assert(num_bb <= UCT_IB_MLX5_MAX_BB);
         src = uct_ib_mlx5_bf_copy(dst, src, num_bb, wq);
         ucs_memory_bus_cacheline_wc_flush();
     } else if (wq->reg->mode == UCT_IB_MLX5_MMIO_MODE_BF_POST_MT) {
+        ucs_assert(wqe_size <= UCT_IB_MLX5_BF_REG_SIZE);
+        ucs_assert(num_bb <= UCT_IB_MLX5_MAX_BB);
         src = uct_ib_mlx5_bf_copy(dst, src, num_bb, wq);
         /* Make sure that HW observes WC writes in order, in case of multiple
          * threads which use the same BF register in a serialized way

@@ -636,7 +636,7 @@ UCS_CLASS_INIT_FUNC(uct_rc_iface_t, uct_iface_ops_t *tl_ops,
     }
 
     /* Initialize RX resources (SRQ) */
-    status = ops->init_rx(self, config);
+    status = ops->init_rx(self, params, config);
     if (status != UCS_OK) {
         goto err_destroy_stats;
     }

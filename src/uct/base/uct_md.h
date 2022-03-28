@@ -236,4 +236,9 @@ static inline ucs_log_level_t uct_md_reg_log_lvl(unsigned flags)
 void uct_md_vfs_init(uct_component_h component, uct_md_h md,
                      const char *md_name);
 
+ucs_status_t uct_mem_alloc_reg(uct_md_h md, size_t length, unsigned flags,
+                               unsigned num_alloc_methods,
+                               uct_alloc_method_t *alloc_methods,
+                               const char *name, uct_allocated_memory_t *mem);
+
 #endif

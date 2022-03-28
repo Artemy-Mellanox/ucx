@@ -1180,6 +1180,12 @@ ucs_status_t ucp_worker_iface_open(ucp_worker_h worker, ucp_rsc_index_t tl_id,
         iface_params->am_alignment    = worker->am.alignment;
     }
 
+    if (context->config.features & UCP_FEATURE_SIG) {
+        iface_params->sig.type           = UCT_SIG_T10DIF;
+        iface_params->sig.am_header_size = sizeof(ucp_am_hdr_t);
+        iface_params->field_mask        |= UCT_IFACE_PARAM_FIELD_SIG;
+    }
+
     /* Open UCT interface */
     status = uct_iface_open(md, worker->uct, iface_params, iface_config,
                             &wiface->iface);

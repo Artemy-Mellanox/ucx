@@ -59,7 +59,8 @@ libuct_ib_la_LDFLAGS +=  $(LIB_MLX5)
 libuct_ib_la_SOURCES += \
 	mlx5/dv/ib_mlx5_dv.c \
 	mlx5/dv/ib_mlx5dv_md.c \
-	mlx5/rx.c
+	mlx5/rx.c \
+	mlx5/sig.c
 endif # HAVE_MLX5_DV
 
 endif # HAVE_MLX5_HW

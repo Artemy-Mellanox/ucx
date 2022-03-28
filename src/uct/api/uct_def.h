@@ -504,6 +504,10 @@ typedef struct uct_cm_ep_server_conn_notify_args {
 typedef ucs_status_t (*uct_am_callback_t)(void *arg, void *data, size_t length,
                                           unsigned flags);
 
+typedef ucs_status_t (*uct_am_sig_callback_t)(void *arg, void *hdr, void *data,
+                                              void *sig, size_t length,
+                                              unsigned flags);
+
 
 /**
  * @ingroup UCT_AM

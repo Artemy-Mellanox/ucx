@@ -206,6 +206,7 @@ enum {
     UCT_IB_MLX5_POLL_FLAG_HAS_EP             = UCS_BIT(1),
     UCT_IB_MLX5_POLL_FLAG_TAG_CQE            = UCS_BIT(2),
     UCT_IB_MLX5_POLL_FLAG_LINKED_LIST        = UCS_BIT(3),
+    UCT_IB_MLX5_POLL_FLAG_SIG                = UCS_BIT(4)
 };
 
 

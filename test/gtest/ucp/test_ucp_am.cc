@@ -996,7 +996,7 @@ public:
         ucp_am_data_release(receiver().worker(), m_data_ptr);
     }
 
-private:
+protected:
     void *m_data_ptr;
 };
 
@@ -1026,6 +1026,88 @@ UCS_TEST_P(test_ucp_am_nbx_eager_data_release, multi_zcopy, "ZCOPY_THRESH=0")
 }
 
 UCP_INSTANTIATE_TEST_CASE(test_ucp_am_nbx_eager_data_release)
+
+
+class test_ucp_am_nbx_sig : public test_ucp_am_nbx_eager_data_release {
+public:
+    test_ucp_am_nbx_sig()
+    {
+
+    }
+
+    static void get_test_variants(std::vector<ucp_test_variant> &variants)
+    {
+        add_variant(variants, UCP_FEATURE_AM | UCP_FEATURE_SIG);
+    }
+
+
+protected:
+    uint16_t ipcs(void *ptr, size_t len)
+    {
+        uint32_t sum = 0;
+        uint16_t *data = (uint16_t *)ptr;
+
+        while (1) {
+            sum += *data;
+            data++;
+            if ((len -= 2) & 0x0f)
+                continue;
+            sum = (sum & 0xffff) + (sum >> 16);
+            if (len == 0)
+                break;
+        }
+
+        return (uint16_t)~((sum & 0xffff) + (sum >> 16));
+    }
+
+    typedef struct {
+        uint16_t guard;
+        uint16_t apptag;
+        uint32_t reftag;
+    } t10dif_t;
+
+    void check_t10dif(void *data, void *sig, int block_num)
+    {
+        t10dif_t *t10dif = (t10dif_t *)sig;
+
+        for (int i = 0; i < block_num; i++) {
+            EXPECT_EQ(ipcs(data, 512), t10dif->guard);
+            data = UCS_PTR_BYTE_OFFSET(data, 512);
+            t10dif++;
+        }
+    }
+
+    virtual ucs_status_t
+    am_data_handler(const void *header, size_t header_length, void *data,
+                    size_t length, const ucp_am_recv_param_t *rx_param)
+    {
+        EXPECT_FALSE(m_am_received);
+        EXPECT_EQ(length, 512 * 8);
+        EXPECT_TRUE(rx_param->recv_attr & UCP_AM_RECV_ATTR_FLAG_DATA);
+        EXPECT_TRUE(rx_param->recv_attr & UCP_AM_RECV_ATTR_FIELD_SIG);
+        EXPECT_TRUE(rx_param->recv_attr & UCP_AM_RECV_ATTR_FIELD_DESC);
+
+        m_am_received = true;
+        m_data_ptr    = rx_param->desc;
+
+        check_header(header, header_length);
+        mem_buffer::pattern_check(data, length, SEED);
+        check_t10dif(data, rx_param->sig, 8);
+
+        return UCS_INPROGRESS;
+        //return UCS_OK;
+    }
+};
+
+UCS_TEST_P(test_ucp_am_nbx_sig, bcopy, "ZCOPY_THRESH=-1", "RNDV_THRESH=-1")
+{
+    for (int i=0; i < 50; i++) {
+        test_data_release(4096);
+    }
+}
+
+UCP_INSTANTIATE_TEST_CASE(test_ucp_am_nbx_sig)
+
 
 class test_ucp_am_nbx_align : public test_ucp_am_nbx {
 public:

@@ -193,6 +193,7 @@ typedef struct {
 
 typedef ucs_status_t
 (*uct_rc_iface_init_rx_func_t)(uct_rc_iface_t *iface,
+                               const uct_iface_params_t *params,
                                const uct_rc_iface_common_config_t *config);
 
 typedef void (*uct_rc_iface_cleanup_rx_func_t)(uct_rc_iface_t *iface);

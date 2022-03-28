@@ -16,6 +16,9 @@
 
 
 ucs_status_t uct_dc_mlx5_iface_devx_create_dct(uct_dc_mlx5_iface_t *iface,
+                                               uct_ib_mlx5_srq_t *srq,
+                                               struct ibv_cq *cq,
+                                               uct_ib_mlx5_qp_t *dct,
                                                int full_handshake)
 {
     uct_ib_device_t *dev  = uct_ib_iface_device(&iface->super.super.super);
@@ -30,15 +33,15 @@ ucs_status_t uct_dc_mlx5_iface_devx_create_dct(uct_dc_mlx5_iface_t *iface,
     dvflags   = MLX5DV_OBJ_PD | MLX5DV_OBJ_CQ;
     dv.pd.in  = uct_ib_iface_md(&iface->super.super.super)->pd;
     dv.pd.out = &dvpd;
-    dv.cq.in  = iface->super.super.super.cq[UCT_IB_DIR_RX];
+    dv.cq.in  = cq;
     dv.cq.out = &dvcq;
     mlx5dv_init_obj(&dv, dvflags);
 
     UCT_IB_MLX5DV_SET(create_dct_in, in, opcode, UCT_IB_MLX5_CMD_OP_CREATE_DCT);
     dctc = UCT_IB_MLX5DV_ADDR_OF(create_dct_in, in, dct_context_entry);
     UCT_IB_MLX5DV_SET(dctc, dctc, pd, dvpd.pdn);
-    ucs_assert(iface->super.rx.srq.srq_num != 0);
-    UCT_IB_MLX5DV_SET(dctc, dctc, srqn_xrqn, iface->super.rx.srq.srq_num);
+    ucs_assert(srq->srq_num != 0);
+    UCT_IB_MLX5DV_SET(dctc, dctc, srqn_xrqn, srq->srq_num);
     if (UCT_RC_MLX5_TM_ENABLED(&iface->super)) {
         UCT_IB_MLX5DV_SET(dctc, dctc, offload_type, UCT_IB_MLX5_QPC_OFFLOAD_TYPE_RNDV);
     }
@@ -76,16 +79,16 @@ ucs_status_t uct_dc_mlx5_iface_devx_create_dct(uct_dc_mlx5_iface_t *iface,
     UCT_IB_MLX5DV_SET(dctc, dctc, my_addr_index, iface->super.super.super.gid_info.gid_index);
     UCT_IB_MLX5DV_SET(dctc, dctc, hop_limit, iface->super.super.super.config.hop_limit);
 
-    iface->rx.dct.devx.obj = mlx5dv_devx_obj_create(dev->ibv_context, in, sizeof(in),
-                                                    out, sizeof(out));
-    if (iface->rx.dct.devx.obj == NULL) {
+    dct->devx.obj = mlx5dv_devx_obj_create(dev->ibv_context, in, sizeof(in),
+                                           out, sizeof(out));
+    if (dct->devx.obj == NULL) {
         ucs_error("mlx5dv_devx_obj_create(DCT) failed, syndrome %x: %m",
                   UCT_IB_MLX5DV_GET(create_dct_out, out, syndrome));
         return UCS_ERR_INVALID_PARAM;
     }
 
-    iface->rx.dct.type   = UCT_IB_MLX5_OBJ_TYPE_DEVX;
-    iface->rx.dct.qp_num = UCT_IB_MLX5DV_GET(create_dct_out, out, dctn);
+    dct->type   = UCT_IB_MLX5_OBJ_TYPE_DEVX;
+    dct->qp_num = UCT_IB_MLX5DV_GET(create_dct_out, out, dctn);
     return UCS_OK;
 }
 

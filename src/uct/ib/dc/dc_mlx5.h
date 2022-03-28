@@ -7,6 +7,7 @@
 #ifndef UCT_DC_IFACE_H
 #define UCT_DC_IFACE_H
 
+#include <uct/ib/mlx5/sig.h>
 #include <uct/ib/rc/base/rc_iface.h>
 #include <uct/ib/rc/base/rc_ep.h>
 #include <uct/ib/rc/verbs/rc_verbs.h>
@@ -263,6 +264,8 @@ struct uct_dc_mlx5_iface {
 
     struct {
         uct_ib_mlx5_qp_t          dct;
+
+        uct_ib_mlx5_sig_t         *sig;
     } rx;
 
     uint8_t                       version_flag;
@@ -280,7 +283,9 @@ extern ucs_config_field_t uct_dc_mlx5_iface_config_table[];
 
 ucs_status_t
 uct_dc_mlx5_iface_create_dct(uct_dc_mlx5_iface_t *iface,
-                             const uct_dc_mlx5_iface_config_t *config);
+                             const uct_dc_mlx5_iface_config_t *config,
+                             uct_ib_mlx5_srq_t *srq, struct ibv_cq *cq,
+                             uct_ib_mlx5_qp_t *dct);
 
 int uct_dc_mlx5_iface_is_reachable(const uct_iface_h tl_iface,
                                    const uct_device_addr_t *dev_addr,
@@ -300,7 +305,7 @@ ucs_status_t uct_dc_mlx5_iface_fc_handler(uct_rc_iface_t *rc_iface, unsigned qp_
                                           uct_rc_hdr_t *hdr, unsigned length,
                                           uint32_t imm_data, uint16_t lid, unsigned flags);
 
-void uct_dc_mlx5_destroy_dct(uct_dc_mlx5_iface_t *iface);
+void uct_dc_mlx5_destroy_dct(uct_ib_mlx5_qp_t *dct);
 
 void uct_dc_mlx5_iface_init_version(uct_dc_mlx5_iface_t *iface, uct_md_h md);
 
@@ -326,6 +331,9 @@ void uct_dc_mlx5_iface_reset_dci(uct_dc_mlx5_iface_t *iface, uint8_t dci_index);
 #if HAVE_DEVX
 
 ucs_status_t uct_dc_mlx5_iface_devx_create_dct(uct_dc_mlx5_iface_t *iface,
+                                               uct_ib_mlx5_srq_t *srq,
+                                               struct ibv_cq *cq,
+                                               uct_ib_mlx5_qp_t *dct,
                                                int full_handshake);
 
 ucs_status_t uct_dc_mlx5_iface_devx_set_srq_dc_params(uct_dc_mlx5_iface_t *iface);
@@ -337,7 +345,8 @@ ucs_status_t uct_dc_mlx5_iface_devx_dci_connect(uct_dc_mlx5_iface_t *iface,
 #else
 
 static UCS_F_MAYBE_UNUSED ucs_status_t uct_dc_mlx5_iface_devx_create_dct(
-        uct_dc_mlx5_iface_t *iface, int full_handshake)
+        uct_dc_mlx5_iface_t *iface, uct_ib_mlx5_srq_t *srq, struct ibv_cq *cq,
+        uct_ib_mlx5_qp_t *dct, int full_handshake)
 {
     return UCS_ERR_UNSUPPORTED;
 }
