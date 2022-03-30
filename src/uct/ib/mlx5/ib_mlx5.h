@@ -193,19 +193,19 @@ enum {
 
 
 enum {
-    UCT_IB_MLX5_SRQ_TOPO_LIST         = 0x0,
-    UCT_IB_MLX5_SRQ_TOPO_CYCLIC       = 0x1,
-    UCT_IB_MLX5_SRQ_TOPO_LIST_MP_RQ   = 0x2,
-    UCT_IB_MLX5_SRQ_TOPO_CYCLIC_MP_RQ = 0x3
-};
-
-
-enum {
 #if UCS_ENABLE_ASSERT
     UCT_IB_MLX5_TXWQ_FLAG_FAILED = UCS_BIT(0)
 #else
     UCT_IB_MLX5_TXWQ_FLAG_FAILED = 0
 #endif
+};
+
+
+enum {
+    UCT_IB_MLX5_POLL_FLAG_TM                 = UCS_BIT(0),
+    UCT_IB_MLX5_POLL_FLAG_HAS_EP             = UCS_BIT(1),
+    UCT_IB_MLX5_POLL_FLAG_TAG_CQE            = UCS_BIT(2),
+    UCT_IB_MLX5_POLL_FLAG_LINKED_LIST        = UCS_BIT(3),
 };
 
 
@@ -260,32 +260,6 @@ typedef enum {
     UCT_IB_MLX5_OBJ_TYPE_DEVX,
     UCT_IB_MLX5_OBJ_TYPE_LAST
 } uct_ib_mlx5_obj_type_t;
-
-
-/* Shared receive queue */
-typedef struct uct_ib_mlx5_srq {
-    uct_ib_mlx5_obj_type_t             type;
-    uint32_t                           srq_num;
-    void                               *buf;
-    volatile uint32_t                  *db;
-    uint16_t                           free_idx;   /* what is completed contiguously */
-    uint16_t                           ready_idx;  /* what is ready to be posted to hw */
-    uint16_t                           sw_pi;      /* what is posted to hw */
-    uint16_t                           mask;
-    uint16_t                           stride;
-    union {
-        struct {
-            struct ibv_srq             *srq;
-        } verbs;
-#if HAVE_DEVX
-        struct {
-            uct_ib_mlx5_dbrec_t        *dbrec;
-            uct_ib_mlx5_devx_umem_t    mem;
-            struct mlx5dv_devx_obj     *obj;
-        } devx;
-#endif
-    };
-} uct_ib_mlx5_srq_t;
 
 
 /* Completion queue */
@@ -478,33 +452,6 @@ typedef struct uct_ib_mlx5_err_cqe {
 } UCS_S_PACKED uct_ib_mlx5_err_cqe_t;
 
 
-/**
- * SRQ segment
- *
- * We add some SW book-keeping information in the unused HW fields:
- *  - desc           - the receive descriptor.
- *  - strides        - Number of available strides in this WQE. When it is 0,
- *                     this segment can be reposted to the HW. Relevant for
- *                     Multi-Packet SRQ only.
- *  - free           - points to the next out-of-order completed segment.
- */
-typedef struct uct_rc_mlx5_srq_seg {
-    union {
-        struct mlx5_wqe_srq_next_seg   mlx5_srq;
-        struct {
-            uint16_t                   ptr_mask;
-            uint16_t                   next_wqe_index; /* Network byte order */
-            uint8_t                    signature;
-            uint8_t                    rsvd1[1];
-            uint8_t                    strides;
-            uint8_t                    free;           /* Released but not posted */
-            uct_ib_iface_recv_desc_t   *desc;          /* Host byte order */
-        } srq;
-    };
-    struct mlx5_wqe_data_seg           dptr[0];
-} uct_ib_mlx5_srq_seg_t;
-
-
 struct uct_ib_mlx5_atomic_masked_cswap32_seg {
     uint32_t           swap;
     uint32_t           compare;
@@ -619,18 +566,6 @@ void uct_ib_mlx5_txwq_vfs_populate(uct_ib_mlx5_txwq_t *txwq, void *parent_obj);
  * Initialize rxwq structure.
  */
 ucs_status_t uct_ib_mlx5_get_rxwq(struct ibv_qp *qp, uct_ib_mlx5_rxwq_t *wq);
-
-/**
- * Initialize srq structure.
- */
-ucs_status_t
-uct_ib_mlx5_verbs_srq_init(uct_ib_mlx5_srq_t *srq, struct ibv_srq *verbs_srq,
-                           size_t sg_byte_count, int num_sge);
-
-void uct_ib_mlx5_srq_buff_init(uct_ib_mlx5_srq_t *srq, uint32_t head,
-                               uint32_t tail, size_t sg_byte_count, int num_sge);
-
-void uct_ib_mlx5_verbs_srq_cleanup(uct_ib_mlx5_srq_t *srq, struct ibv_srq *verbs_srq);
 
 /**
  * DEVX UAR API

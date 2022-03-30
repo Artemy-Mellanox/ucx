@@ -4,6 +4,9 @@
  * See file LICENSE for terms.
  */
 
+#ifndef UCT_IB_MLX5_INL_
+#define UCT_IB_MLX5_INL_
+
 #include "ib_mlx5.h"
 
 
@@ -29,22 +32,6 @@ uct_ib_mlx5_cqe_stride_index(struct mlx5_cqe64* cqe)
     uint16_t *stride = (uint16_t*)&cqe->rsvd20[2];
     return ntohs(*stride);
 #endif
-}
-
-static UCS_F_ALWAYS_INLINE int uct_ib_mlx5_srq_stride(int num_sge)
-{
-    int stride;
-
-    stride = sizeof(struct mlx5_wqe_srq_next_seg) +
-             (num_sge * sizeof(struct mlx5_wqe_data_seg));
-
-    return ucs_roundup_pow2(stride);
-}
-
-static UCS_F_ALWAYS_INLINE int
-uct_ib_mlx5_srq_max_wrs(int rxq_len, int num_sge)
-{
-    return ucs_max(rxq_len / num_sge, UCT_IB_MLX5_XRQ_MIN_UWQ_POST);
 }
 
 static UCS_F_ALWAYS_INLINE int
@@ -538,12 +525,6 @@ uct_ib_mlx5_post_send(uct_ib_mlx5_txwq_t *wq, struct mlx5_wqe_ctrl_seg *ctrl,
 }
 
 
-static inline uct_ib_mlx5_srq_seg_t *
-uct_ib_mlx5_srq_get_wqe(uct_ib_mlx5_srq_t *srq, uint16_t wqe_index)
-{
-    return UCS_PTR_BYTE_OFFSET(srq->buf, (wqe_index & srq->mask) * srq->stride);
-}
-
 static ucs_status_t UCS_F_MAYBE_UNUSED
 uct_ib_mlx5_iface_fill_attr(uct_ib_iface_t *iface,
                             uct_ib_mlx5_qp_t *qp,
@@ -575,3 +556,5 @@ uct_ib_mlx5_iface_fill_attr(uct_ib_iface_t *iface,
 
     return UCS_OK;
 }
+
+#endif

@@ -909,8 +909,10 @@ struct uct_ib_mlx5_cmd_pas_bits {
 };
 
 enum {
-    UCT_IB_MLX5_WQ_WQ_TYPE_WQ_LINKED_LIST  = 0x0,
-    UCT_IB_MLX5_WQ_WQ_TYPE_WQ_CYCLIC       = 0x1
+    UCT_IB_MLX5_WQ_TYPE_LINKED_LIST     = 0x0,
+    UCT_IB_MLX5_WQ_TYPE_CYCLIC          = 0x1,
+    UCT_IB_MLX5_WQ_TYPE_LINKED_LIST_MP  = 0x2,
+    UCT_IB_MLX5_WQ_TYPE_CYCLIC_MP       = 0x3
 };
 
 enum {

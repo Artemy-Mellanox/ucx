@@ -392,7 +392,7 @@ private:
 
             status = uct_rc_iface_qp_create(&m_iface->super, &m_ibqp, &attr,
                                             m_iface->super.config.tx_qp_len,
-                                            m_iface->srq);
+                                            m_iface->rx.ibv);
             ASSERT_UCS_OK(status);
 
             status = uct_rc_iface_qp_init(&m_iface->super, m_ibqp);

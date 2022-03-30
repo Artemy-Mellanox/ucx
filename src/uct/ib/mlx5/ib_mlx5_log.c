@@ -9,9 +9,10 @@
 #endif
 
 #include "ib_mlx5_log.h"
+#include "rx.inl"
 
 #include <uct/ib/base/ib_device.h>
-#include <uct/ib/mlx5/ib_mlx5.inl>
+#include <uct/ib/mlx5/rx.inl>
 #include <uct/ib/rc/accel/rc_mlx5_common.h>
 #include <string.h>
 

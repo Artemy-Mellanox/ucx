@@ -230,12 +230,6 @@ typedef struct uct_rc_iface_ops {
 } uct_rc_iface_ops_t;
 
 
-typedef struct uct_rc_srq {
-    unsigned                 available;
-    unsigned                 quota;
-} uct_rc_srq_t;
-
-
 struct uct_rc_iface {
     uct_ib_iface_t              super;
 
@@ -260,11 +254,6 @@ struct uct_rc_iface {
         int                     in_pending;
 #endif
     } tx;
-
-    struct {
-        ucs_mpool_t          mp;
-        uct_rc_srq_t         srq;
-    } rx;
 
     struct {
         unsigned             tx_qp_len;
@@ -424,7 +413,7 @@ ucs_status_t uct_rc_iface_event_arm(uct_iface_h tl_iface, unsigned events);
 ucs_status_t uct_rc_iface_common_event_arm(uct_iface_h tl_iface,
                                            unsigned events, int force_rx_all);
 
-ucs_status_t uct_rc_iface_init_rx(uct_rc_iface_t *iface,
+ucs_status_t uct_rc_iface_init_rx(uct_ib_md_t *md, uct_ib_srq_t *srq, void* ctx,
                                   const uct_rc_iface_common_config_t *config,
                                   struct ibv_srq **p_srq);
 

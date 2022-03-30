@@ -11,6 +11,7 @@
 #include <uct/ib/rc/base/rc_iface.h>
 #include <uct/ib/rc/base/rc_ep.h>
 #include <uct/ib/mlx5/ib_mlx5.h>
+#include <uct/ib/mlx5/rx.h>
 
 
 /*
@@ -104,14 +105,6 @@ UCT_RC_MLX5_DECLARE_ATOMIC_LE_HANDLER(32)
 UCT_RC_MLX5_DECLARE_ATOMIC_LE_HANDLER(64)
 
 
-typedef enum {
-    UCT_RC_MLX5_SRQ_TOPO_LIST,
-    UCT_RC_MLX5_SRQ_TOPO_CYCLIC,
-    UCT_RC_MLX5_SRQ_TOPO_CYCLIC_EMULATED,
-    UCT_RC_MLX5_SRQ_TOPO_LAST
-} uct_rc_mlx5_srq_topo_t;
-
-
 enum {
     UCT_RC_MLX5_IFACE_STAT_RX_INL_32,
     UCT_RC_MLX5_IFACE_STAT_RX_INL_64,
@@ -141,13 +134,6 @@ enum {
     UCT_RC_MLX5_CQE_APP_OP_TM_APPEND         = 0x5,
     UCT_RC_MLX5_CQE_APP_OP_TM_REMOVE         = 0x6,
     UCT_RC_MLX5_CQE_APP_OP_TM_CONSUMED_MSG   = 0xA
-};
-
-enum {
-    UCT_RC_MLX5_POLL_FLAG_TM                 = UCS_BIT(0),
-    UCT_RC_MLX5_POLL_FLAG_HAS_EP             = UCS_BIT(1),
-    UCT_RC_MLX5_POLL_FLAG_TAG_CQE            = UCS_BIT(2),
-    UCT_RC_MLX5_POLL_FLAG_LINKED_LIST        = UCS_BIT(3)
 };
 
 
@@ -319,13 +305,6 @@ typedef struct uct_rc_mlx5_tmh_priv_data {
     uint16_t                    data;
 } UCS_S_PACKED uct_rc_mlx5_tmh_priv_data_t;
 
-void uct_rc_mlx5_release_desc(uct_recv_desc_t *self, void *desc);
-
-typedef struct uct_rc_mlx5_release_desc {
-    uct_recv_desc_t             super;
-    unsigned                    offset;
-} uct_rc_mlx5_release_desc_t;
-
 
 typedef struct uct_rc_mlx5_ctx_priv {
     uint64_t                    tag;
@@ -369,6 +348,7 @@ typedef struct uct_rc_mlx5_iface_common {
     struct {
         uct_ib_mlx5_srq_t              srq;
         void                           *pref_ptr;
+        ucs_mpool_t                    mp;
     } rx;
     uct_ib_mlx5_cq_t                   cq[UCT_IB_DIR_NUM];
     struct {
@@ -404,9 +384,9 @@ typedef struct uct_rc_mlx5_iface_common {
             void                       *arg; /* User defined arg */
             uct_tag_unexp_rndv_cb_t    cb;   /* Callback for unexpected rndv messages */
         } rndv_unexp;
-        uct_rc_mlx5_release_desc_t     eager_desc;
-        uct_rc_mlx5_release_desc_t     rndv_desc;
-        uct_rc_mlx5_release_desc_t     am_desc;
+        uct_ib_mlx5_release_desc_t     eager_desc;
+        uct_ib_mlx5_release_desc_t     rndv_desc;
+        uct_ib_mlx5_release_desc_t     am_desc;
         UCS_STATS_NODE_DECLARE(stats)
     } tm;
 #if HAVE_IBV_DM
@@ -424,7 +404,7 @@ typedef struct uct_rc_mlx5_iface_common {
 #endif
     struct {
         uint8_t                        atomic_fence_flag;
-        uct_rc_mlx5_srq_topo_t         srq_topo;
+        uct_ib_mlx5_srq_topo_t         srq_topo;
         uint8_t                        log_ack_req_freq;
     } config;
     UCS_STATS_NODE_DECLARE(stats)
@@ -673,26 +653,6 @@ uct_rc_mlx5_devx_init_rx_tm(uct_rc_mlx5_iface_common_t *iface,
                             int dc, unsigned rndv_hdr_len)
 {
     return UCS_ERR_UNSUPPORTED;
-}
-#endif
-
-#if HAVE_DEVX
-ucs_status_t uct_rc_mlx5_devx_init_rx(uct_rc_mlx5_iface_common_t *iface,
-                                      const uct_rc_iface_common_config_t *config);
-
-void uct_rc_mlx5_devx_cleanup_srq(uct_ib_mlx5_md_t *md, uct_ib_mlx5_srq_t *srq);
-#else
-static UCS_F_MAYBE_UNUSED ucs_status_t
-uct_rc_mlx5_devx_init_rx(uct_rc_mlx5_iface_common_t *iface,
-                         const uct_rc_iface_common_config_t *config)
-{
-    return UCS_ERR_UNSUPPORTED;
-}
-
-static UCS_F_MAYBE_UNUSED void
-uct_rc_mlx5_devx_cleanup_srq(uct_ib_mlx5_md_t *md, uct_ib_mlx5_srq_t *srq)
-{
-    ucs_bug("DEVX SRQ cleanup has to be done only if DEVX support is enabled");
 }
 #endif
 

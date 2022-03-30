@@ -488,27 +488,27 @@ unsigned uct_rc_iface_do_progress(uct_iface_h tl_iface)
     return iface->progress(iface);
 }
 
-ucs_status_t uct_rc_iface_init_rx(uct_rc_iface_t *iface,
+ucs_status_t uct_rc_iface_init_rx(uct_ib_md_t *md, uct_ib_srq_t *srq, void* ctx,
                                   const uct_rc_iface_common_config_t *config,
                                   struct ibv_srq **srq_p)
 {
     struct ibv_srq_init_attr srq_init_attr;
-    struct ibv_pd *pd = uct_ib_iface_md(&iface->super)->pd;
-    struct ibv_srq *srq;
+    struct ibv_pd *pd = md->pd;
+    struct ibv_srq *ibsrq;
 
     srq_init_attr.attr.max_sge   = 1;
     srq_init_attr.attr.max_wr    = config->super.rx.queue_len;
     srq_init_attr.attr.srq_limit = 0;
-    srq_init_attr.srq_context    = iface;
-    srq                          = ibv_create_srq(pd, &srq_init_attr);
+    srq_init_attr.srq_context    = ctx;
+    ibsrq                        = ibv_create_srq(pd, &srq_init_attr);
     if (srq == NULL) {
         uct_ib_mem_lock_limit_msg("ibv_create_srq()", errno,
                                   UCS_LOG_LEVEL_ERROR);
         return UCS_ERR_IO_ERROR;
     }
-    iface->rx.srq.quota          = srq_init_attr.attr.max_wr;
-    *srq_p                       = srq;
 
+    srq->quota = srq_init_attr.attr.max_wr;
+    *srq_p     = ibsrq;
     return UCS_OK;
 }
 
@@ -541,8 +541,6 @@ UCS_CLASS_INIT_FUNC(uct_rc_iface_t, uct_iface_ops_t *tl_ops,
     tx_cq_size                  = uct_ib_cq_size(&self->super, init_attr,
                                                  UCT_IB_DIR_TX);
     self->tx.cq_available       = tx_cq_size - 1;
-    self->rx.srq.available      = 0;
-    self->rx.srq.quota          = 0;
     self->config.tx_qp_len      = config->super.tx.queue_len;
     self->config.tx_min_sge     = config->super.tx.min_sge;
     self->config.tx_min_inline  = config->super.tx.min_inline;
@@ -600,13 +598,6 @@ UCS_CLASS_INIT_FUNC(uct_rc_iface_t, uct_iface_ops_t *tl_ops,
         goto err;
     }
 
-    /* Create RX buffers mempool */
-    status = uct_ib_iface_recv_mpool_init(&self->super, &config->super, params,
-                                          "rc_recv_desc", &self->rx.mp);
-    if (status != UCS_OK) {
-        goto err;
-    }
-
     /* Create TX buffers mempool */
     status = uct_iface_mpool_init(&self->super.super,
                                   &self->tx.mp,
@@ -618,7 +609,7 @@ UCS_CLASS_INIT_FUNC(uct_rc_iface_t, uct_iface_ops_t *tl_ops,
                                   uct_rc_iface_send_desc_init,
                                   "rc_send_desc");
     if (status != UCS_OK) {
-        goto err_destroy_rx_mp;
+        goto err;
     }
 
     /* Allocate tx operations */
@@ -684,8 +675,6 @@ err_cleanup_tx_ops:
     uct_rc_iface_tx_ops_cleanup(self);
 err_destroy_tx_mp:
     ucs_mpool_cleanup(&self->tx.mp, 1);
-err_destroy_rx_mp:
-    ucs_mpool_cleanup(&self->rx.mp, 1);
 err:
     return status;
 }
@@ -746,7 +735,6 @@ static UCS_CLASS_CLEANUP_FUNC(uct_rc_iface_t)
     ops->cleanup_rx(self);
     uct_rc_iface_tx_ops_cleanup(self);
     ucs_mpool_cleanup(&self->tx.mp, 1);
-    ucs_mpool_cleanup(&self->rx.mp, 0); /* Cannot flush SRQ */
     ucs_mpool_cleanup(&self->tx.pending_mp, 1);
 }
 

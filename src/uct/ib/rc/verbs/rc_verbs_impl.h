@@ -34,11 +34,11 @@ static inline unsigned uct_rc_verbs_iface_post_recv_common(uct_rc_verbs_iface_t 
     unsigned batch = iface->super.super.config.rx_max_batch;
     unsigned count;
 
-    if (iface->super.rx.srq.available < batch) {
+    if (iface->rx.srq.available < batch) {
         if (ucs_likely(fill == 0)) {
             return 0;
         } else {
-            count = iface->super.rx.srq.available;
+            count = iface->rx.srq.available;
         }
     } else {
         count = batch;
@@ -109,7 +109,7 @@ uct_rc_verbs_iface_poll_rx_common(uct_rc_verbs_iface_t *iface)
         uct_rc_verbs_iface_handle_am(&iface->super, hdr, wc[i].wr_id, wc[i].qp_num,
                                      wc[i].byte_len, wc[i].imm_data, wc[i].slid);
     }
-    iface->super.rx.srq.available += num_wcs;
+    iface->rx.srq.available += num_wcs;
     UCS_STATS_UPDATE_COUNTER(iface->super.stats, UCT_RC_IFACE_STAT_RX_COMPLETION, num_wcs);
 
 out:

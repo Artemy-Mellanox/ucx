@@ -96,7 +96,7 @@ uct_rc_mlx5_iface_srq_set_seg(uct_rc_mlx5_iface_common_t *iface,
 
     desc_map = ~seg->srq.ptr_mask & UCS_MASK(iface->tm.mp.num_strides);
     ucs_for_each_bit(i, desc_map) {
-        UCT_TL_IFACE_GET_RX_DESC(&iface->super.super.super, &iface->super.rx.mp,
+        UCT_TL_IFACE_GET_RX_DESC(&iface->super.super.super, &iface->rx.mp,
                                  desc, return UCS_ERR_NO_MEMORY);
 
         /* Set receive data segment pointer. Length is pre-initialized. */
@@ -112,28 +112,9 @@ uct_rc_mlx5_iface_srq_set_seg(uct_rc_mlx5_iface_common_t *iface,
     return UCS_OK;
 }
 
-/* Update resources and write doorbell record */
-static UCS_F_ALWAYS_INLINE void
-uct_rc_mlx5_iface_update_srq_res(uct_rc_iface_t *iface, uct_ib_mlx5_srq_t *srq,
-                                 uint16_t wqe_index, uint16_t count)
-{
-    ucs_assert(iface->rx.srq.available >= count);
-
-    if (count == 0) {
-        return;
-    }
-
-    srq->ready_idx              = wqe_index;
-    srq->sw_pi                 += count;
-    iface->rx.srq.available    -= count;
-    ucs_memory_cpu_store_fence();
-    *srq->db                    = htonl(srq->sw_pi);
-}
-
 unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface)
 {
     uct_ib_mlx5_srq_t *srq   = &iface->rx.srq;
-    uct_rc_iface_t *rc_iface = &iface->super;
     uct_ib_mlx5_srq_seg_t *seg;
     uint16_t count, wqe_index, next_index;
 
@@ -144,7 +125,7 @@ unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface)
                       sizeof(struct mlx5_wqe_srq_next_seg));
 
     ucs_assert(UCS_CIRCULAR_COMPARE16(srq->ready_idx, <=, srq->free_idx));
-    ucs_assert(rc_iface->rx.srq.available > 0);
+    ucs_assert(iface->rx.srq.super.available > 0);
 
     wqe_index = srq->ready_idx;
     for (;;) {
@@ -168,7 +149,7 @@ unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface)
     }
 
     count = wqe_index - srq->sw_pi;
-    uct_rc_mlx5_iface_update_srq_res(rc_iface, srq, wqe_index, count);
+    uct_ib_mlx5_iface_update_srq_res(srq, wqe_index, count);
     ucs_assert(uct_ib_mlx5_srq_get_wqe(srq, srq->mask)->srq.next_wqe_index == 0);
     return count;
 }
@@ -176,12 +157,11 @@ unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface)
 unsigned uct_rc_mlx5_iface_srq_post_recv_ll(uct_rc_mlx5_iface_common_t *iface)
 {
     uct_ib_mlx5_srq_t *srq     = &iface->rx.srq;
-    uct_rc_iface_t *rc_iface   = &iface->super;
     uct_ib_mlx5_srq_seg_t *seg = NULL;
     uint16_t count             = 0;
     uint16_t wqe_index, next_index;
 
-    ucs_assert(rc_iface->rx.srq.available > 0);
+    ucs_assert(iface->rx.srq.super.available > 0);
 
     wqe_index = srq->ready_idx;
     seg       = uct_ib_mlx5_srq_get_wqe(srq, wqe_index);
@@ -201,7 +181,7 @@ unsigned uct_rc_mlx5_iface_srq_post_recv_ll(uct_rc_mlx5_iface_common_t *iface)
         count++;
     }
 
-    uct_rc_mlx5_iface_update_srq_res(rc_iface, srq, wqe_index, count);
+    uct_ib_mlx5_iface_update_srq_res(srq, wqe_index, count);
     return count;
 }
 
@@ -209,12 +189,12 @@ void uct_rc_mlx5_iface_common_prepost_recvs(uct_rc_mlx5_iface_common_t *iface)
 {
     /* prepost recvs only if quota available (recvs were not preposted
      * before) */
-    if (iface->super.rx.srq.quota == 0) {
+    if (iface->rx.srq.super.quota == 0) {
         return;
     }
 
-    iface->super.rx.srq.available = iface->super.rx.srq.quota;
-    iface->super.rx.srq.quota     = 0;
+    iface->rx.srq.super.available = iface->rx.srq.super.quota;
+    iface->rx.srq.super.quota     = 0;
     uct_rc_mlx5_iface_srq_post_recv(iface);
 }
 
@@ -551,9 +531,9 @@ uct_rc_mlx5_common_iface_init_rx(uct_rc_mlx5_iface_common_t *iface,
     uct_ib_mlx5_md_t *md = ucs_derived_of(iface->super.super.super.md, uct_ib_mlx5_md_t);
     ucs_status_t status;
 
-    ucs_assert(iface->config.srq_topo != UCT_RC_MLX5_SRQ_TOPO_CYCLIC);
+    ucs_assert(iface->config.srq_topo != UCT_IB_MLX5_SRQ_TOPO_CYCLIC);
 
-    status = uct_rc_iface_init_rx(&iface->super, rc_config,
+    status = uct_rc_iface_init_rx(&md->super, &iface->rx.srq.super, iface, rc_config,
                                   &iface->rx.srq.verbs.srq);
     if (status != UCS_OK) {
         goto err;
@@ -589,20 +569,12 @@ void uct_rc_mlx5_destroy_srq(uct_ib_mlx5_md_t *md, uct_ib_mlx5_srq_t *srq)
         if (ret) {
             ucs_warn("mlx5dv_devx_obj_destroy(SRQ) failed: %m");
         }
-        uct_rc_mlx5_devx_cleanup_srq(md, srq);
+        uct_ib_mlx5_devx_cleanup_srq(md, srq);
 #endif
         break;
     case UCT_IB_MLX5_OBJ_TYPE_LAST:
         break;
     }
-}
-
-void uct_rc_mlx5_release_desc(uct_recv_desc_t *self, void *desc)
-{
-    uct_rc_mlx5_release_desc_t *release = ucs_derived_of(self,
-                                                         uct_rc_mlx5_release_desc_t);
-    void *ib_desc = (char*)desc - release->offset;
-    ucs_mpool_put_inline(ib_desc);
 }
 
 #if IBV_HW_TM
@@ -795,8 +767,8 @@ void uct_rc_mlx5_init_rx_tm_common(uct_rc_mlx5_iface_common_t *iface,
     unsigned tmh_hdrs_len = sizeof(struct ibv_tmh) + rndv_hdr_len;
     ucs_status_t status;
 
-    iface->tm.eager_desc.super.cb = uct_rc_mlx5_release_desc;
-    iface->tm.rndv_desc.super.cb  = uct_rc_mlx5_release_desc;
+    iface->tm.eager_desc.super.cb = uct_ib_mlx5_release_desc;
+    iface->tm.rndv_desc.super.cb  = uct_ib_mlx5_release_desc;
 
     if (UCT_RC_MLX5_MP_ENABLED(iface)) {
         iface->tm.eager_desc.offset = sizeof(struct ibv_tmh) +
@@ -858,7 +830,7 @@ ucs_status_t uct_rc_mlx5_init_rx_tm(uct_rc_mlx5_iface_common_t *iface,
     uct_ib_md_t *md = uct_ib_iface_md(&iface->super.super);
     ucs_status_t status;
 
-    ucs_assert(iface->config.srq_topo != UCT_RC_MLX5_SRQ_TOPO_CYCLIC);
+    ucs_assert(iface->config.srq_topo != UCT_IB_MLX5_SRQ_TOPO_CYCLIC);
 
     uct_rc_mlx5_init_rx_tm_common(iface, config, rndv_hdr_len);
 
@@ -913,7 +885,7 @@ ucs_status_t uct_rc_mlx5_init_rx_tm(uct_rc_mlx5_iface_common_t *iface,
         return UCS_ERR_IO_ERROR;
     }
 
-    iface->super.rx.srq.quota = srq_attr->attr.max_wr;
+    iface->rx.srq.super.quota = srq_attr->attr.max_wr;
 #endif
 
     status = uct_ib_mlx5_verbs_srq_init(&iface->rx.srq, iface->rx.srq.verbs.srq,

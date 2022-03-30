@@ -81,13 +81,19 @@ typedef struct uct_rc_verbs_iface_config {
  */
 typedef struct uct_rc_verbs_iface {
     uct_rc_iface_t              super;
-    struct ibv_srq              *srq;
     struct ibv_send_wr          inl_am_wr;
     struct ibv_send_wr          inl_rwrite_wr;
     struct ibv_sge              inl_sge[UCT_IB_MAX_IOV];
     uct_rc_am_short_hdr_t       am_inl_hdr;
     ucs_mpool_t                 short_desc_mp;
     uct_rc_iface_send_desc_t    *fc_desc; /* used when max_inline is zero */
+
+    struct {
+        uct_ib_srq_t            srq;
+        struct ibv_srq          *ibv;
+        ucs_mpool_t             mp;
+    } rx;
+
     struct {
         size_t                  short_desc_size;
         size_t                  max_inline;
