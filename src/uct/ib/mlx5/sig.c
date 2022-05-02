@@ -55,6 +55,7 @@ enum {
     MLX5_DIF_CRC           = 0x1,
     MLX5_DIF_IPCS          = 0x2,
     MLX5_MKEY_BSF_EN       = 1 << 30,
+    MLX5_WQE_UMR_CTRL_MKEY_MASK_BSF_ENABLE = 1 << 12,
 };
 
 
@@ -165,7 +166,7 @@ void uct_ib_mlx5_dump_mr(struct mlx5dv_devx_obj *mr, uint32_t mkey)
     UCT_IB_MLX5DV_SET(query_mkey_in, in, mkey_index, mkey >> 8);
 
     ret = mlx5dv_devx_obj_query(mr, in, sizeof(in), out, sizeof(out));
-    ucs_assert(ret == 0);
+    ucs_assert_always(ret == 0);
     ucs_log_dump_hex_buf_lvl(out, sizeof(out), UCS_LOG_LEVEL_PRINT);
 }
 
@@ -488,8 +489,8 @@ unsigned uct_ib_mlx5_sig_post_recv(uct_ib_mlx5_sig_t *sig)
     uct_ib_mlx5_srq_seg_t *seg;
     uint16_t count, wqe_index, next_index;
     size_t desc_len = sig->payload_offset;
-    size_t hdr_size = desc_len - sig->hdr_offset;
-    void *hdr, *data, *sign;
+    size_t UCS_V_UNUSED hdr_size = desc_len - sig->hdr_offset;
+    void *hdr, UCS_V_UNUSED *data, UCS_V_UNUSED *sign;
     unsigned idx;
 
     wqe_index = srq->ready_idx;
@@ -689,7 +690,7 @@ unsigned uct_ib_mlx5_poll_sig(uct_ib_iface_t *iface, uct_ib_mlx5_sig_t *sig)
     uct_ib_mlx5_srq_seg_t *seg;
     uct_ib_mlx5_sig_recv_desc_t *desc;
     void *hdr, *data, *sign;
-    unsigned idx, byte_len, block_num;
+    unsigned idx, byte_len, UCS_V_UNUSED block_num;
     size_t desc_len = sig->payload_offset;
     uint16_t wqe_ctr;
     ucs_status_t status;
