@@ -39,6 +39,7 @@
     _macro(ucp_tag_rndv_proto) \
     _macro(ucp_eager_tag_offload_short_proto) \
     _macro(ucp_am_eager_bcopy_single_proto) \
+    _macro(ucp_am_eager_bcopy_sig_proto) \
     _macro(ucp_eager_sync_bcopy_single_proto) \
     _macro(ucp_tag_offload_eager_zcopy_single_proto) \
     _macro(ucp_eager_sync_zcopy_single_proto) \

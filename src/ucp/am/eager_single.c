@@ -121,19 +121,21 @@ static size_t ucp_eager_single_pack(void *dest, void *arg)
     return sizeof(*hdr) + length;
 }
 
-static ucs_status_t ucp_eager_bcopy_single_progress(uct_pending_req_t *self)
+static ucs_status_t
+ucp_eager_bcopy_progress_common(uct_pending_req_t *self, ucp_am_id_t am_id)
 {
     ucp_request_t                   *req = ucs_container_of(self, ucp_request_t,
                                                             send.uct);
     const ucp_proto_single_priv_t *spriv = req->send.proto_config->priv;
 
     return ucp_proto_am_bcopy_single_progress(
-            req, UCP_AM_ID_AM_SINGLE, spriv->super.lane, ucp_eager_single_pack,
+            req, am_id, spriv->super.lane, ucp_eager_single_pack,
             req, SIZE_MAX, ucp_proto_request_bcopy_complete_success);
 }
 
 static ucs_status_t
-ucp_proto_eager_bcopy_single_init(const ucp_proto_init_params_t *init_params)
+ucp_proto_eager_bcopy_init_common(const ucp_proto_init_params_t *init_params,
+                                  int sig)
 {
     ucp_context_t *context                = init_params->worker->context;
     ucp_proto_single_init_params_t params = {
@@ -160,7 +162,22 @@ ucp_proto_eager_bcopy_single_init(const ucp_proto_init_params_t *init_params)
         return UCS_ERR_UNSUPPORTED;
     }
 
+    if (!(context->config.features & UCP_FEATURE_SIG) == sig) {
+        return UCS_ERR_UNSUPPORTED;
+    }
+
     return ucp_proto_single_init(&params);
+}
+
+static ucs_status_t ucp_eager_bcopy_single_progress(uct_pending_req_t *self)
+{
+    return ucp_eager_bcopy_progress_common(self, UCP_AM_ID_AM_SINGLE);
+}
+
+static ucs_status_t
+ucp_proto_eager_bcopy_single_init(const ucp_proto_init_params_t *init_params)
+{
+    return ucp_proto_eager_bcopy_init_common(init_params, 0);
 }
 
 ucp_proto_t ucp_am_eager_bcopy_single_proto = {
@@ -170,6 +187,27 @@ ucp_proto_t ucp_am_eager_bcopy_single_proto = {
     .init     = ucp_proto_eager_bcopy_single_init,
     .query    = ucp_proto_single_query,
     .progress = {ucp_eager_bcopy_single_progress},
+    .abort    = ucp_request_complete_send
+};
+
+static ucs_status_t ucp_eager_bcopy_sig_progress(uct_pending_req_t *self)
+{
+    return ucp_eager_bcopy_progress_common(self, UCP_AM_ID_AM_SIG);
+}
+
+static ucs_status_t
+ucp_proto_eager_bcopy_sig_init(const ucp_proto_init_params_t *init_params)
+{
+    return ucp_proto_eager_bcopy_init_common(init_params, 1);
+}
+
+ucp_proto_t ucp_am_eager_bcopy_sig_proto = {
+    .name     = "egr/am/single/bcopy/sig",
+    .desc     = UCP_PROTO_COPY_IN_DESC,
+    .flags    = 0,
+    .init     = ucp_proto_eager_bcopy_sig_init,
+    .query    = ucp_proto_single_query,
+    .progress = {ucp_eager_bcopy_sig_progress},
     .abort    = ucp_request_complete_send
 };
 

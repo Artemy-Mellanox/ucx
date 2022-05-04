@@ -1032,14 +1032,26 @@ class test_ucp_am_nbx_sig : public test_ucp_am_nbx_eager_data_release {
 public:
     test_ucp_am_nbx_sig()
     {
-
+        if (enable_proto()) {
+            modify_config("PROTO_ENABLE", "y");
+        }
     }
 
-    static void get_test_variants(std::vector<ucp_test_variant> &variants)
+    static void get_base_variants(std::vector<ucp_test_variant> &variants)
     {
         add_variant(variants, UCP_FEATURE_AM | UCP_FEATURE_SIG);
     }
 
+    static void get_test_variants(std::vector<ucp_test_variant> &variants)
+    {
+        get_base_variants(variants);
+        add_variant_values(variants, get_base_variants, 1, "proto");
+    }
+
+    virtual unsigned enable_proto()
+    {
+        return get_variant_value(0);
+    }
 
 protected:
     uint16_t ipcs(void *ptr, size_t len)
