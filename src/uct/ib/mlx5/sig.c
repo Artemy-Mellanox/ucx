@@ -720,13 +720,13 @@ unsigned uct_ib_mlx5_poll_sig(uct_ib_iface_t *iface, uct_ib_mlx5_sig_t *sig)
     block_num = (byte_len + sig->hdr_offset - desc_len) / 512;
 
     idx = UCS_PTR_BYTE_DIFF(desc->base, desc) / desc_len;
-    printf("%s:%d %p %p %d %p\n", __func__, __LINE__, iface, sig->srq, idx, desc->base);
+    //printf("%s:%d %p %p %d %p\n", __func__, __LINE__, iface, sig->srq, idx, desc->base);
     ucs_assert(desc == UCS_PTR_BYTE_OFFSET(desc->base, idx * desc_len + sizeof(ucs_mpool_elem_t)));
     hdr = UCS_PTR_BYTE_OFFSET(desc, sig->hdr_offset - sizeof(ucs_mpool_elem_t));
     sign = UCS_PTR_BYTE_OFFSET(desc->base, desc->num_elems * (desc_len + 512 * 16) + idx * 8 * 16);
     data = UCS_PTR_BYTE_OFFSET(desc->base,  desc->num_elems * desc_len + idx * 512 * 16);
 
-    if (1) {
+    if (0) {
         //ucs_log_dump_hex_buf_lvl(cqe, sizeof(struct mlx5_cqe64), UCS_LOG_LEVEL_PRINT);
         //ucs_log_dump_hex_buf_lvl(seg, 48, UCS_LOG_LEVEL_PRINT);
 
