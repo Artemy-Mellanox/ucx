@@ -50,7 +50,7 @@ static ucs_status_t ucp_proto_reconfig_progress(uct_pending_req_t *self)
     ucp_ep_h ep        = req->send.ep;
 
     /* This protocol should not be selected for valid and connected endpoint */
-    ucs_assert(!(ep->flags & UCP_EP_FLAG_REMOTE_CONNECTED));
+    // ucs_assert(!(ep->flags & UCP_EP_FLAG_REMOTE_CONNECTED));
 
     if (ep->cfg_index != req->send.proto_config->ep_cfg_index) {
         ucp_trace_req(req,

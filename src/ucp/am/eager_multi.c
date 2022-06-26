@@ -52,6 +52,10 @@ ucp_proto_eager_am_bcopy_multi_init(const ucp_proto_init_params_t *init_params)
         return UCS_ERR_UNSUPPORTED;
     }
 
+    if (!(context->config.features & UCP_FEATURE_SIG) == 0) {
+        return UCS_ERR_UNSUPPORTED;
+    }
+
     return ucp_proto_multi_init(&params, params.super.super.priv,
                                 params.super.super.priv_size);
 }

@@ -55,7 +55,7 @@ enum {
     MLX5_DIF_CRC           = 0x1,
     MLX5_DIF_IPCS          = 0x2,
     MLX5_MKEY_BSF_EN       = 1 << 30,
-    MLX5_WQE_UMR_CTRL_MKEY_MASK_BSF_ENABLE = 1 << 12,
+    //MLX5_WQE_UMR_CTRL_MKEY_MASK_BSF_ENABLE = 1 << 12,
 };
 
 
@@ -610,7 +610,9 @@ ucs_status_t uct_ib_mlx5_sig_init(uct_ib_mlx5_md_t *md,
 
     sig->max_batch         = config->rx.max_batch;
     sig->num_alloc_methods = config->super.alloc_methods.count;
-    sig->alloc_methods     = config->super.alloc_methods.methods;
+    sig->alloc_methods     = ucs_malloc(sizeof(uct_alloc_method_t) * sig->num_alloc_methods, "");
+    memcpy(sig->alloc_methods, config->super.alloc_methods.methods,
+           sizeof(uct_alloc_method_t) * sig->num_alloc_methods);
 
     sig->desc.super.cb     = uct_ib_mlx5_release_desc;
     sig->desc.offset       = sizeof(uct_ib_mlx5_sig_recv_desc_t) +
@@ -692,9 +694,11 @@ unsigned uct_ib_mlx5_poll_sig(uct_ib_iface_t *iface, uct_ib_mlx5_sig_t *sig)
     void *hdr, *data, *sign;
     unsigned idx, byte_len, UCS_V_UNUSED block_num;
     size_t desc_len = sig->payload_offset;
+    size_t hdr_size = desc_len - sig->hdr_offset;
     uint16_t wqe_ctr;
     ucs_status_t status;
     int err = 0;
+    void *inl;
 
     cqe = uct_ib_mlx5_peek_cq(sig->cq, &err);
     if (cqe == NULL) {
@@ -726,7 +730,30 @@ unsigned uct_ib_mlx5_poll_sig(uct_ib_iface_t *iface, uct_ib_mlx5_sig_t *sig)
     sign = UCS_PTR_BYTE_OFFSET(desc->base, desc->num_elems * (desc_len + 512 * 16) + idx * 8 * 16);
     data = UCS_PTR_BYTE_OFFSET(desc->base,  desc->num_elems * desc_len + idx * 512 * 16);
 
+    VALGRIND_MAKE_MEM_DEFINED(hdr, sizeof(uct_rc_mlx5_hdr_t));
+    VALGRIND_MAKE_MEM_DEFINED(sign, block_num * 8);
+    VALGRIND_MAKE_MEM_DEFINED(data, block_num * 512);
+
+    if (cqe->op_own & MLX5_INLINE_SCATTER_32) {
+        inl = cqe;
+    } else if (cqe->op_own & MLX5_INLINE_SCATTER_64) {
+        inl = cqe - 1;
+    } else {
+        inl = NULL;
+    }
+
+    if (inl) {
+        if (byte_len > hdr_size) {
+            memcpy(hdr, inl, hdr_size);
+            inl = UCS_PTR_BYTE_OFFSET(inl, hdr_size);
+            memcpy(data, inl, byte_len - hdr_size);
+        } else {
+            memcpy(hdr, inl, byte_len);
+        }
+    }
+
     if (0) {
+        printf("%s:%d %p %p %d %p\n", __func__, __LINE__, iface, sig->srq, idx, desc->base);
         //ucs_log_dump_hex_buf_lvl(cqe, sizeof(struct mlx5_cqe64), UCS_LOG_LEVEL_PRINT);
         //ucs_log_dump_hex_buf_lvl(seg, 48, UCS_LOG_LEVEL_PRINT);
 
@@ -736,9 +763,6 @@ unsigned uct_ib_mlx5_poll_sig(uct_ib_iface_t *iface, uct_ib_mlx5_sig_t *sig)
         ucs_log_dump_hex_buf_lvl(sign, 80, UCS_LOG_LEVEL_PRINT);
     }
 
-    VALGRIND_MAKE_MEM_DEFINED(hdr, sizeof(uct_rc_mlx5_hdr_t));
-    VALGRIND_MAKE_MEM_DEFINED(sign, block_num * 8);
-    VALGRIND_MAKE_MEM_DEFINED(data, block_num * 512);
     status = uct_ib_mlx5_sig_am_handler(iface, sig, cqe, seg, hdr, data, sign,
                                         byte_len);
 
