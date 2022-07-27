@@ -1039,6 +1039,7 @@ public:
 
     static void get_base_variants(std::vector<ucp_test_variant> &variants)
     {
+        add_variant(variants, UCP_FEATURE_AM);
         add_variant(variants, UCP_FEATURE_AM | UCP_FEATURE_SIG);
     }
 
@@ -1095,25 +1096,32 @@ protected:
     {
         EXPECT_FALSE(m_am_received);
         EXPECT_EQ(length, 512 * 8);
-        EXPECT_TRUE(rx_param->recv_attr & UCP_AM_RECV_ATTR_FLAG_DATA);
-        EXPECT_TRUE(rx_param->recv_attr & UCP_AM_RECV_ATTR_FIELD_SIG);
-        EXPECT_TRUE(rx_param->recv_attr & UCP_AM_RECV_ATTR_FIELD_DESC);
+
+        if (get_variant_ctx_params().features & UCP_FEATURE_SIG) {
+            EXPECT_TRUE(rx_param->recv_attr & UCP_AM_RECV_ATTR_FLAG_DATA);
+            EXPECT_TRUE(rx_param->recv_attr & UCP_AM_RECV_ATTR_FIELD_SIG);
+            EXPECT_TRUE(rx_param->recv_attr & UCP_AM_RECV_ATTR_FIELD_DESC);
+            check_t10dif(data, rx_param->sig, 8);
+            m_data_ptr    = rx_param->desc;
+        } else {
+            m_data_ptr    = data;
+        }
 
         m_am_received = true;
-        m_data_ptr    = rx_param->desc;
 
         check_header(header, header_length);
         mem_buffer::pattern_check(data, length, SEED);
-        check_t10dif(data, rx_param->sig, 8);
 
         return UCS_INPROGRESS;
-        //return UCS_OK;
+        return UCS_OK;
     }
 };
 
 UCS_TEST_P(test_ucp_am_nbx_sig, bcopy, "ZCOPY_THRESH=-1", "RNDV_THRESH=-1")
 {
-    for (int i=0; i < 50; i++) {
+    int max_iter = 4000;
+
+    for (int i = 0; i < max_iter; i++) {
         test_data_release(4096);
     }
 }

@@ -487,13 +487,14 @@ unsigned uct_ib_mlx5_sig_post_recv(uct_ib_mlx5_sig_t *sig)
     uct_ib_mlx5_srq_t *srq   = sig->srq;
     uct_ib_mlx5_sig_recv_desc_t *desc = NULL;
     uct_ib_mlx5_srq_seg_t *seg;
-    uint16_t count, wqe_index, next_index;
+    uint16_t count = 0, wqe_index, next_index;
     size_t desc_len = sig->payload_offset;
     size_t UCS_V_UNUSED hdr_size = desc_len - sig->hdr_offset;
     void *hdr, UCS_V_UNUSED *data, UCS_V_UNUSED *sign;
     unsigned idx;
 
     wqe_index = srq->ready_idx;
+#if 0
     for (;;) {
         next_index = wqe_index + 1;
         seg = uct_ib_mlx5_srq_get_wqe(srq, next_index);
@@ -506,6 +507,15 @@ unsigned uct_ib_mlx5_sig_post_recv(uct_ib_mlx5_sig_t *sig)
             seg->srq.free  = 0;
             srq->free_idx  = next_index;
         }
+#else
+    seg = uct_ib_mlx5_srq_get_wqe(srq, wqe_index);
+    for (;;) {
+        next_index = ntohs(seg->srq.next_wqe_index);
+        if (next_index == (srq->free_idx & srq->mask)) {
+            break;
+        }
+        seg = uct_ib_mlx5_srq_get_wqe(srq, next_index);
+#endif
 
         UCT_TL_IFACE_GET_RX_DESC(NULL, sig->mp, desc, break);
 
@@ -525,9 +535,10 @@ unsigned uct_ib_mlx5_sig_post_recv(uct_ib_mlx5_sig_t *sig)
         seg->dptr[1].addr  = htobe64(idx * 512 * 16);
 
         wqe_index = next_index;
+        count++;
     }
 
-    count = wqe_index - srq->sw_pi;
+    //count = wqe_index - srq->sw_pi;
 
     uct_ib_mlx5_iface_update_srq_res(srq, wqe_index, count);
     return count;
@@ -770,7 +781,8 @@ unsigned uct_ib_mlx5_poll_sig(uct_ib_iface_t *iface, uct_ib_mlx5_sig_t *sig)
                                       sizeof(uct_ib_mlx5_sig_recv_desc_t) +
                                       sizeof(uct_recv_desc_t) +
                                       sizeof(uct_rc_mlx5_hdr_t),
-                                      &sig->desc.super, 0);
+                                      &sig->desc.super,
+                                      UCT_IB_MLX5_POLL_FLAG_LINKED_LIST);
 
     uct_ib_mlx5_update_db_cq_ci(sig->cq);
 
