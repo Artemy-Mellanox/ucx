@@ -55,7 +55,7 @@ enum {
     MLX5_DIF_CRC           = 0x1,
     MLX5_DIF_IPCS          = 0x2,
     MLX5_MKEY_BSF_EN       = 1 << 30,
-    //MLX5_WQE_UMR_CTRL_MKEY_MASK_BSF_ENABLE = 1 << 12,
+    UCT_IB_MLX5_WQE_UMR_CTRL_MKEY_MASK_BSF_ENABLE = 1 << 12,
 };
 
 
@@ -322,7 +322,7 @@ uct_ib_mlx5_sig_umr_start(uct_ib_mlx5_md_t *md, size_t xlt_size,
     umr_ctrl->mkey_mask = htobe64(MLX5_WQE_UMR_CTRL_MKEY_MASK_FREE |
                                   MLX5_WQE_UMR_CTRL_MKEY_MASK_MKEY |
                                   MLX5_WQE_UMR_CTRL_MKEY_MASK_START_ADDR |
-                                  MLX5_WQE_UMR_CTRL_MKEY_MASK_BSF_ENABLE |
+                                  UCT_IB_MLX5_WQE_UMR_CTRL_MKEY_MASK_BSF_ENABLE |
                                   MLX5_WQE_UMR_CTRL_MKEY_MASK_LEN);
     umr_ctrl->klm_octowords      = htobe16(xlt_size);
     umr_ctrl->translation_offset = htobe16(bsf_size);
