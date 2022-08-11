@@ -475,8 +475,9 @@ UCS_TEST_P(test_ud, crep_ack_drop) {
 
 static const char resend_iov_buf[] = "abc";
 
-static ucs_status_t
-test_ud_am_handler(void *arg, void *data, size_t length, unsigned flags)
+static ucs_status_t test_ud_am_handler(void *arg, void *data, size_t length,
+                                       unsigned flags,
+                                       uct_am_callback_params_t *params)
 {
     *(uint32_t*)arg = 1;
     EXPECT_STREQ(resend_iov_buf, (char*)data);

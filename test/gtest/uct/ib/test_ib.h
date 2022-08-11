@@ -24,8 +24,9 @@ public:
     test_uct_ib();
     void init();
     virtual void create_connected_entities();
-    static ucs_status_t ib_am_handler(void *arg, void *data,
-                                      size_t length, unsigned flags);
+    static ucs_status_t ib_am_handler(void *arg, void *data, size_t length,
+                                      unsigned flags,
+                                      uct_am_callback_params_t *params);
     virtual void send_recv_short();
 
 protected:

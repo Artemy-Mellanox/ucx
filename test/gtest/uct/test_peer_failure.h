@@ -44,7 +44,8 @@ public:
     }
 
     static ucs_status_t am_dummy_handler(void *arg, void *data, size_t length,
-                                         unsigned flags);
+                                         unsigned flags,
+                                         uct_am_callback_params_t *params);
     static ucs_status_t pending_cb(uct_pending_req_t *self);
     static void purge_cb(uct_pending_req_t *self, void *arg);
     static ucs_status_t err_cb(void *arg, uct_ep_h ep, ucs_status_t status);

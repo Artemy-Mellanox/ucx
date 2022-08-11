@@ -523,7 +523,7 @@ void ucp_stream_ep_activate(ucp_ep_h ep)
 
 static UCS_F_ALWAYS_INLINE ucs_status_t
 ucp_stream_am_handler(void *am_arg, void *am_data, size_t am_length,
-                      unsigned am_flags)
+                      unsigned am_flags, uct_am_callback_params_t *params)
 {
     ucp_worker_h          worker    = am_arg;
     ucp_stream_am_data_t *data      = am_data;

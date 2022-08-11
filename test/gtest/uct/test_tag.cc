@@ -424,7 +424,8 @@ public:
     }
 
     static ucs_status_t am_handler(void *arg, void *data, size_t length,
-                                   unsigned flags)
+                                   unsigned flags,
+                                   uct_am_callback_params_t *params)
     {
         is_am_received = true;
         return UCS_OK;
@@ -951,7 +952,8 @@ public:
                      bool is_eager = true);
 
     static ucs_status_t am_handler(void *arg, void *data, size_t length,
-                                   unsigned flags);
+                                   unsigned flags,
+                                   uct_am_callback_params_t *params);
 
     static ucs_status_t unexp_eager(void *arg, void *data, size_t length,
                                     unsigned flags, uct_tag_t stag,
@@ -1131,7 +1133,8 @@ ucs_status_t test_tag_mp_xrq::handle_uct_desc(void *data, unsigned flags)
 }
 
 ucs_status_t test_tag_mp_xrq::am_handler(void *arg, void *data, size_t length,
-                                         unsigned flags)
+                                         unsigned flags,
+                                         uct_am_callback_params_t *params)
 {
    EXPECT_TRUE(flags & UCT_CB_PARAM_FLAG_FIRST);
    EXPECT_FALSE(flags & UCT_CB_PARAM_FLAG_MORE);

@@ -59,7 +59,9 @@ public:
     }
 
     static ucs_status_t am_handler(void *arg, void *data, size_t length,
-                                   unsigned flags) {
+                                   unsigned flags,
+                                   uct_am_callback_params_t *params)
+    {
         uct_p2p_am_test *self = reinterpret_cast<uct_p2p_am_test*>(arg);
         return self->am_handler(data, length, flags);
     }
@@ -86,7 +88,9 @@ public:
     }
 
     static ucs_status_t am_handler_resp(void *arg, void *data, size_t length,
-                                        unsigned flags) {
+                                        unsigned flags,
+                                        uct_am_callback_params_t *params)
+    {
         uct_p2p_am_test *self = reinterpret_cast<uct_p2p_am_test*>(arg);
 
         ucs_assert(self->receiver().iface_attr().cap.flags &
@@ -840,8 +844,9 @@ public:
         EXPECT_EQ(UCS_ERR_INVALID_PARAM, status) << "alignment " << alignment;
     }
 
-    static ucs_status_t
-    am_handler(void *arg, void *data, size_t length, unsigned flags)
+    static ucs_status_t am_handler(void *arg, void *data, size_t length,
+                                   unsigned flags,
+                                   uct_am_callback_params_t *params)
     {
         uct_p2p_am_alignment *self = reinterpret_cast<uct_p2p_am_alignment*>(
                 arg);

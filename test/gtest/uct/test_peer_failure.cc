@@ -51,9 +51,10 @@ void test_uct_peer_failure::init()
     }
 }
 
-ucs_status_t test_uct_peer_failure::am_dummy_handler(void *arg, void *data,
-                                                     size_t length,
-                                                     unsigned flags)
+ucs_status_t
+test_uct_peer_failure::am_dummy_handler(void *arg, void *data, size_t length,
+                                        unsigned flags,
+                                        uct_am_callback_params_t *params)
 {
     test_uct_peer_failure* test = reinterpret_cast<test_uct_peer_failure*>(arg);
     uint64_t index              = *reinterpret_cast<uint64_t*>(data);

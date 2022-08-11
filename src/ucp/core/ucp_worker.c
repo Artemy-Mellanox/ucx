@@ -212,7 +212,8 @@ static void ucp_worker_set_am_handlers(ucp_worker_iface_t *wiface, int is_proxy)
 }
 
 static ucs_status_t ucp_stub_am_handler(void *arg, void *data, size_t length,
-                                        unsigned flags)
+                                        unsigned flags,
+                                        uct_am_callback_params_t *params)
 {
     ucp_worker_h worker = arg;
     ucs_trace("worker %p: drop message", worker);

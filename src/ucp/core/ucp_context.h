@@ -392,13 +392,13 @@ typedef struct ucp_tl_iface_atomic_flags {
  */
 #define UCP_DEFINE_AM_WITH_PROXY(_features, _id, _cb, _tracer, _flags) \
     \
-    static ucs_status_t \
-    ucp_am_##_id##_counting_proxy(void *arg, void *data, size_t length, \
-                                  unsigned flags) \
+    static ucs_status_t ucp_am_##_id##_counting_proxy( \
+            void *arg, void *data, size_t length, unsigned flags, \
+            uct_am_callback_params_t *params) \
     { \
         ucp_worker_iface_t *wiface = arg; \
         wiface->proxy_recv_count++; \
-        return _cb(wiface->worker, data, length, flags); \
+        return _cb(wiface->worker, data, length, flags, params); \
     } \
     \
     _UCP_DEFINE_AM(_features, _id, _cb, _tracer, _flags, \

@@ -428,7 +428,7 @@ ucs_status_t uct_rc_iface_fc_handler(uct_rc_iface_t *iface, unsigned qp_num,
 out:
     return uct_iface_invoke_am(&iface->super.super,
                                (hdr->am_id & ~UCT_RC_EP_FC_MASK),
-                               hdr + 1, length, flags);
+                               hdr + 1, length, flags, NULL);
 }
 
 static ucs_status_t uct_rc_iface_tx_ops_init(uct_rc_iface_t *iface)
