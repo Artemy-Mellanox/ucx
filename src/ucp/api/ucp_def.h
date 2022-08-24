@@ -629,10 +629,8 @@ typedef ucs_status_t (*ucp_am_callback_t)(void *arg, void *data, size_t length,
  *                            If @a header_length is 0, this value is undefined
  *                            and must not be accessed.
  * @param [in]  header_length Active message header length in bytes. 
- * @param [in]  data          Points to the received data if @a
- *                            UCP_AM_RECV_ATTR_FLAG_RNDV flag is not set in
- *                            @ref ucp_am_recv_param_t.recv_attr. Otherwise
- *                            it points to the internal UCP descriptor which
+ * @param [in]  data          Points to internal UCP descriptor.
+ *                            if @a UCP_AM_RECV_ATTR_FLAG_RNDV flag is set data
  *                            can further be used for initiating data receive
  *                            by using @ref ucp_am_recv_data_nbx routine.
  * @param [in]  length        Length of data. If @a UCP_AM_RECV_ATTR_FLAG_RNDV
@@ -641,20 +639,30 @@ typedef ucs_status_t (*ucp_am_callback_t)(void *arg, void *data, size_t length,
  *                            initiating rendezvous protocol.
  * @param [in]  param         Data receive parameters.
  *
- * @return UCS_OK         @a data will not persist after the callback returns.
+ * @return UCS_OK         @a data and @a ucp_am_recv_param_t.payload will not
+ *                        persist after the callback returns.
  *                        If UCP_AM_RECV_ATTR_FLAG_RNDV flag is set in
  *                        @a param->recv_attr and @ref ucp_am_recv_data_nbx was
  *                        not called for this data, the data descriptor will be
  *                        dropped and the corresponding @ref ucp_am_send_nbx
- *                        call will complete with UCS_OK status.
+ *                        call will complete with UCS_OK status (in such case,
+ *                        @a ucp_am_recv_param_t.payload is not valid).
  *
  * @return UCS_INPROGRESS Can only be returned if @a param->recv_attr flags
  *                        contains UCP_AM_RECV_ATTR_FLAG_DATA or
- *                        UCP_AM_RECV_ATTR_FLAG_RNDV. The @a data will persist
- *                        after the callback has returned. To free the memory,
- *                        a pointer to the data must be passed into
- *                        @ref ucp_am_data_release or data receive is initiated
- *                        by @ref ucp_am_recv_data_nbx.
+ *                        UCP_AM_RECV_ATTR_FLAG_RNDV.
+ *                        @a ucp_am_recv_param_t.payload will persist after the
+ *                        callback has returned. If user-defined allocator is used,
+ *                        the payload can be recycled for another allocation.
+ *                        Otherwise, it will be released automatically when
+ *                        @a data is released.
+ *                        @a data will persist only if user-defined allocator is NOT used
+ *                        or when @a param->recv_attr flags contains
+ *                        UCP_AM_RECV_ATTR_FLAG_RNDV. It should be released by
+ *                        one of two ways:
+ *                        1. Passing @a data into @ref ucp_am_data_release.
+ *                        2. Initiating data receive by calling @ref ucp_am_recv_data_nbx
+ *                           with @a data.
  *
  * @return otherwise      Can only be returned if @a param->recv_attr contains
  *                        UCP_AM_RECV_ATTR_FLAG_RNDV. In this case data
