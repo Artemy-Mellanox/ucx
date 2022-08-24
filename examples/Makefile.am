@@ -5,6 +5,8 @@
 # See file LICENSE for terms.
 #
 
+CFLAGS_PEDANTIC =
+
 examplesdir = $(pkgdatadir)/examples
 dist_examples_DATA =   \
 	hello_world_util.h \
