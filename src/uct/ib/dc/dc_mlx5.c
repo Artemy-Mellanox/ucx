@@ -342,15 +342,13 @@ static ucs_status_t uct_dc_mlx5_iface_create_dci(uct_dc_mlx5_iface_t *iface,
 
     if (md->flags & UCT_IB_MLX5_MD_FLAG_DEVX_DCI) {
         attr.super.max_inl_cqe[UCT_IB_DIR_RX] = 0;
-        attr.uidx             = htonl(dci_index) >> UCT_IB_UIDX_SHIFT;
-        attr.full_handshake   = full_handshake;
+        attr.uidx           = htonl(dci_index) >> UCT_IB_UIDX_SHIFT;
+        attr.full_handshake = full_handshake;
         attr.rdma_wr_disabled = (iface->flags & UCT_DC_MLX5_IFACE_FLAG_DISABLE_PUT) &&
                                 (md->flags & UCT_IB_MLX5_MD_FLAG_NO_RDMA_WR_OPTIMIZED);
-        status = uct_ib_mlx5_devx_create_qp(ib_iface,
-                                            &iface->super.cq[UCT_IB_DIR_TX],
-                                            &iface->super.cq[UCT_IB_DIR_RX],
-                                            &dci->txwq.super, &dci->txwq,
-                                            &attr);
+        status = uct_rc_mlx5_iface_common_devx_create_qp(&iface->super,
+                                                         &dci->txwq.super,
+                                                         &dci->txwq, &attr);
         if (status != UCS_OK) {
             return status;
         }

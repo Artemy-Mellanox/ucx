@@ -254,38 +254,6 @@ KHASH_MAP_INIT_INT(rkeys, uct_ib_mlx5_mem_lru_entry_t*);
 
 #endif
 
-
-/**
- * MLX5 IB memory domain.
- */
-typedef struct uct_ib_mlx5_md {
-    uct_ib_md_t              super;
-    uint32_t                 flags;
-    ucs_mpool_t              dbrec_pool;
-    ucs_recursive_spinlock_t dbrec_lock;
-#if HAVE_DEVX
-    void                     *zero_buf;
-    uct_ib_mlx5_devx_umem_t  zero_mem;
-
-    struct {
-        ucs_list_link_t      list;
-        khash_t(rkeys)       hash;
-        size_t               count;
-    } lru_rkeys;
-
-    struct ibv_mr            *flush_mr;
-    struct mlx5dv_devx_obj   *flush_dvmr;
-    uint8_t                  mkey_tag;
-#endif
-    struct {
-        size_t dc;
-        size_t ud;
-    } dv_tx_wqe_ratio;
-    /* The maximum number of outstanding RDMA Read/Atomic operations per DC QP. */
-    uint8_t                  max_rd_atomic_dc;
-} uct_ib_mlx5_md_t;
-
-
 typedef enum {
     UCT_IB_MLX5_MMIO_MODE_BF_POST,    /* BF without flush, can be used only from
                                          one thread */
@@ -311,6 +279,9 @@ typedef struct uct_ib_mlx5_iface_config {
     ucs_ternary_auto_value_t ar_enable;
     ucs_ternary_auto_value_t cqe_zipping_enable;
 } uct_ib_mlx5_iface_config_t;
+
+
+typedef struct uct_ib_mlx5_md uct_ib_mlx5_md_t;
 
 
 /**
@@ -437,7 +408,29 @@ typedef struct uct_ib_mlx5_qp_attr {
     uint32_t                    uidx;
     int                         full_handshake;
     int                         rdma_wr_disabled;
+    int                         is_roce_dev;
+    uint16_t                    pkey_index;
+    uct_ib_mlx5_devx_uar_t      *uar;
 } uct_ib_mlx5_qp_attr_t;
+
+
+typedef struct uct_ib_mlx5_qp_connect_attr {
+    uint32_t              dest_qp_num;
+    struct ibv_ah_attr    *ah_attr;
+    enum ibv_mtu          path_mtu;
+    uint8_t               path_index;
+    int                   is_roce_dev;
+    uct_ib_roce_version_t roce_ver;
+    uint8_t               traffic_class;
+    uint8_t               sl;
+    uint8_t               min_rnr_timer;
+    uint8_t               timeout;
+    uint8_t               rnr_retry;
+    uint8_t               retry_cnt;
+    uint8_t               max_rd_atomic;
+    unsigned              exp_backoff;
+    unsigned              log_ack_req_freq;
+} uct_ib_mlx5_qp_connect_attr_t;
 
 
 /* MLX5 QP wrapper */
@@ -478,6 +471,46 @@ typedef struct uct_ib_mlx5_txwq {
 #endif
     uct_ib_fence_info_t         fi;
 } uct_ib_mlx5_txwq_t;
+
+
+/**
+ * MLX5 IB memory domain.
+ */
+typedef struct uct_ib_mlx5_md {
+    uct_ib_md_t              super;
+    uint32_t                 flags;
+    ucs_mpool_t              dbrec_pool;
+    ucs_recursive_spinlock_t dbrec_lock;
+#if HAVE_DEVX
+    void                     *zero_buf;
+    uct_ib_mlx5_devx_umem_t  zero_mem;
+
+    struct {
+        uct_ib_mlx5_txwq_t     txwq;
+        uct_ib_mlx5_devx_uar_t *uar;
+        struct {
+            struct ibv_cq      *ibv;
+            uct_ib_mlx5_cq_t   mlx5;
+        } cq;
+    } umr; /* special stuff for creating UMR */
+
+    struct {
+        ucs_list_link_t      list;
+        khash_t(rkeys)       hash;
+        size_t               count;
+    } lru_rkeys;
+
+    struct ibv_mr            *flush_mr;
+    struct mlx5dv_devx_obj   *flush_dvmr;
+    uint8_t                  mkey_tag;
+#endif
+    struct {
+        size_t dc;
+        size_t ud;
+    } dv_tx_wqe_ratio;
+    /* The maximum number of outstanding RDMA Read/Atomic operations per DC QP. */
+    uint8_t                  max_rd_atomic_dc;
+} uct_ib_mlx5_md_t;
 
 
 /* Receive work-queue */
@@ -725,9 +758,7 @@ void uct_ib_mlx5_txwq_validate_always(uct_ib_mlx5_txwq_t *wq, uint16_t num_bb,
 
 #if HAVE_DEVX
 
-ucs_status_t uct_ib_mlx5_devx_create_qp(uct_ib_iface_t *iface,
-                                        const uct_ib_mlx5_cq_t *send_cq,
-                                        const uct_ib_mlx5_cq_t *recv_cq,
+ucs_status_t uct_ib_mlx5_devx_create_qp(uct_ib_mlx5_md_t *md,
                                         uct_ib_mlx5_qp_t *qp,
                                         uct_ib_mlx5_txwq_t *tx,
                                         uct_ib_mlx5_qp_attr_t *attr);
@@ -738,6 +769,10 @@ ucs_status_t uct_ib_mlx5_devx_modify_qp(uct_ib_mlx5_qp_t *qp,
 
 ucs_status_t uct_ib_mlx5_devx_modify_qp_state(uct_ib_mlx5_qp_t *qp,
                                               enum ibv_qp_state state);
+
+ucs_status_t
+uct_ib_mlx5_devx_connect_rc_qp(uct_ib_mlx5_md_t *md, uct_ib_mlx5_qp_t *qp,
+                               const uct_ib_mlx5_qp_connect_attr_t *attr);
 
 void uct_ib_mlx5_devx_destroy_qp(uct_ib_mlx5_md_t *md, uct_ib_mlx5_qp_t *qp);
 
@@ -841,9 +876,7 @@ uct_ib_mlx5_md_buf_free(uct_ib_mlx5_md_t *md, void *buf, uct_ib_mlx5_devx_umem_t
 #else
 
 static inline ucs_status_t
-uct_ib_mlx5_devx_create_qp(uct_ib_iface_t *iface,
-                           const uct_ib_mlx5_cq_t *send_cq,
-                           const uct_ib_mlx5_cq_t *recv_cq,
+uct_ib_mlx5_devx_create_qp(uct_ib_mlx5_md_t *md,
                            uct_ib_mlx5_qp_t *qp,
                            uct_ib_mlx5_txwq_t *tx,
                            uct_ib_mlx5_qp_attr_t *attr)
@@ -860,6 +893,13 @@ uct_ib_mlx5_devx_modify_qp(uct_ib_mlx5_qp_t *qp,
 
 static inline ucs_status_t
 uct_ib_mlx5_devx_modify_qp_state(uct_ib_mlx5_qp_t *qp, enum ibv_qp_state state)
+{
+    return UCS_ERR_UNSUPPORTED;
+}
+
+ucs_status_t
+uct_ib_mlx5_devx_connect_rc_qp(uct_ib_mlx5_md_t *md, uct_ib_mlx5_qp_t *qp,
+                               const uct_ib_mlx5_qp_connect_attr_t *attr)
 {
     return UCS_ERR_UNSUPPORTED;
 }
