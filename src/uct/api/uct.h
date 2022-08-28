@@ -931,8 +931,11 @@ enum uct_iface_feature {
     /** Request remote flush support */ 
     UCT_IFACE_FEATURE_FLUSH_REMOTE = UCS_BIT(6),
 
+    /** Request signature offload support */
+    UCT_IFACE_FEATURE_SIGNATURE    = UCS_BIT(7),
+
     /** Used to determine the number of features */ 
-    UCT_IFACE_FEATURE_LAST         = UCS_BIT(7)
+    UCT_IFACE_FEATURE_LAST         = UCS_BIT(8)
 };
 
 /*

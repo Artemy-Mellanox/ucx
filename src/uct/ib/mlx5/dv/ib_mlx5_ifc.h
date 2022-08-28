@@ -64,6 +64,7 @@
 enum {
     UCT_IB_MLX5_CMD_OP_QUERY_HCA_CAP           = 0x100,
     UCT_IB_MLX5_CMD_OP_CREATE_MKEY             = 0x200,
+    UCT_IB_MLX5_CMD_OP_QUERY_MKEY              = 0x201,
     UCT_IB_MLX5_CMD_OP_CREATE_CQ               = 0x400,
     UCT_IB_MLX5_CMD_OP_CREATE_QP               = 0x500,
     UCT_IB_MLX5_CMD_OP_RST2INIT_QP             = 0x502,
@@ -72,6 +73,8 @@ enum {
     UCT_IB_MLX5_CMD_OP_2ERR_QP                 = 0x507,
     UCT_IB_MLX5_CMD_OP_2RST_QP                 = 0x50a,
     UCT_IB_MLX5_CMD_OP_QUERY_QP                = 0x50b,
+    UCT_IB_MLX5_CMD_OP_CREATE_PSV              = 0x600,
+    UCT_IB_MLX5_CMD_OP_DESTROY_PSV             = 0x601,
     UCT_IB_MLX5_CMD_OP_CREATE_RMP              = 0x90c,
     UCT_IB_MLX5_CMD_OP_CREATE_DCT              = 0x710,
     UCT_IB_MLX5_CMD_OP_DRAIN_DCT               = 0x712,
@@ -1714,6 +1717,41 @@ struct uct_ib_mlx5_create_cq_in_bits {
     uint8_t         reserved_at_300[0x580];
 
     uint8_t         pas[];
+};
+
+struct uct_ib_mlx5_create_psv_out_bits {
+    uint8_t         status[0x8];
+    uint8_t         reserved_at_8[0x18];
+
+    uint8_t         syndrome[0x20];
+
+    uint8_t         reserved_at_40[0x40];
+
+    uint8_t         reserved_at_80[0x8];
+    uint8_t         psv0_index[0x18];
+
+    uint8_t         reserved_at_a0[0x8];
+    uint8_t         psv1_index[0x18];
+
+    uint8_t         reserved_at_c0[0x8];
+    uint8_t         psv2_index[0x18];
+
+    uint8_t         reserved_at_e0[0x8];
+    uint8_t         psv3_index[0x18];
+};
+
+struct uct_ib_mlx5_create_psv_in_bits {
+    uint8_t         opcode[0x10];
+    uint8_t         reserved_at_10[0x10];
+
+    uint8_t         reserved_at_20[0x10];
+    uint8_t         op_mod[0x10];
+
+    uint8_t         num_psv[0x4];
+    uint8_t         reserved_at_44[0x4];
+    uint8_t         pd[0x18];
+
+    uint8_t         reserved_at_60[0x20];
 };
 
 #endif

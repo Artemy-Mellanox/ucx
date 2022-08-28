@@ -639,7 +639,7 @@ UCS_CLASS_INIT_FUNC(uct_base_iface_t, uct_iface_ops_t *ops,
 
 static UCS_CLASS_CLEANUP_FUNC(uct_base_iface_t)
 {
-    if (!self->rx_allocator.user_allocator) {
+    if (self->rx_allocator.allocator.arg == &self->payload_mp) {
         ucs_mpool_cleanup(&self->payload_mp, 0);
     }
     UCS_STATS_NODE_FREE(self->stats);

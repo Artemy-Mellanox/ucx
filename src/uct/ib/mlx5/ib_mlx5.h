@@ -33,6 +33,7 @@
 #endif
 
 #include <uct/ib/mlx5/dv/ib_mlx5_dv.h>
+#include <uct/ib/mlx5/dv/ib_mlx5_def.h>
 
 #include <infiniband/mlx5dv.h>
 #include <netinet/in.h>
@@ -267,6 +268,13 @@ typedef struct uct_ib_mlx5_md {
     void                     *zero_buf;
     uct_ib_mlx5_devx_umem_t  zero_mem;
 
+    uct_ib_mlx5_umr_t        *umr;
+
+    struct {
+        struct mlx5dv_devx_obj     *obj;
+        uint32_t                   idx;
+    } psv;
+
     struct {
         ucs_list_link_t      list;
         khash_t(rkeys)       hash;
@@ -478,7 +486,6 @@ typedef struct uct_ib_mlx5_txwq {
 #endif
     uct_ib_fence_info_t         fi;
 } uct_ib_mlx5_txwq_t;
-
 
 /* Receive work-queue */
 typedef struct uct_ib_mlx5_rxwq {

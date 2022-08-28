@@ -1211,6 +1211,7 @@ ucp_am_invoke_cb(ucp_worker_h worker, uint16_t am_id, void *user_hdr,
         param.recv_attr = recv_flags;
         param.reply_ep  = reply_ep;
         param.payload   = uct_cb_params->payload;
+        param.signature = uct_cb_params->signature;
 
         return am_cb->cb(am_cb->context, user_hdr, user_hdr_length, data,
                          data_length, &param);
