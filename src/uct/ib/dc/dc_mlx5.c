@@ -299,6 +299,12 @@ static unsigned uct_dc_mlx5_iface_progress_tm(void *arg)
     return uct_dc_mlx5_iface_progress(arg, UCT_RC_MLX5_POLL_FLAG_TM);
 }
 
+static unsigned uct_dc_mlx5_iface_progress_sig(void *arg)
+{
+    return uct_dc_mlx5_iface_progress(arg, UCT_RC_MLX5_POLL_FLAG_LINKED_LIST |
+                                           UCT_RC_MLX5_POLL_FLAG_SIG);
+}
+
 static void UCS_CLASS_DELETE_FUNC_NAME(uct_dc_mlx5_iface_t)(uct_iface_t*);
 
 static void uct_ib_mlx5_dci_qp_update_attr(uct_ib_qp_init_attr_t *qp_attr)
@@ -660,7 +666,10 @@ uct_dc_mlx5_init_rx(uct_rc_iface_t *rc_iface,
         goto err;
     }
 
-    if (iface->super.config.srq_topo == UCT_RC_MLX5_SRQ_TOPO_LIST) {
+    if (iface->super.flags & UCT_RC_MLX5_IFACE_FLAG_SIG) {
+        ucs_assert(iface->super.config.srq_topo == UCT_RC_MLX5_SRQ_TOPO_LIST);
+        iface->super.super.progress = uct_dc_mlx5_iface_progress_sig;
+    } else if (iface->super.config.srq_topo == UCT_RC_MLX5_SRQ_TOPO_LIST) {
         iface->super.super.progress = uct_dc_mlx5_iface_progress_ll;
     } else {
         iface->super.super.progress = uct_dc_mlx5_iface_progress_cyclic;
@@ -1381,6 +1390,12 @@ static UCS_CLASS_INIT_FUNC(uct_dc_mlx5_iface_t, uct_md_h tl_md, uct_worker_h wor
         init_attr.flags  |= UCT_IB_TM_SUPPORTED;
     }
 
+    if (params->field_mask & UCT_IFACE_PARAM_FIELD_FEATURES) {
+        if (params->features & UCT_IFACE_FEATURE_SIG) {
+            self->super.flags |= UCT_RC_MLX5_IFACE_FLAG_SIG;
+        }
+    }
+
     status = uct_dc_mlx5_calc_sq_length(md, tx_queue_len, &sq_length);
     if (status != UCS_OK) {
         return status;
@@ -1432,9 +1447,10 @@ static UCS_CLASS_INIT_FUNC(uct_dc_mlx5_iface_t, uct_md_h tl_md, uct_worker_h wor
         self->tx.num_dci_pools = self->super.super.super.num_paths;
     }
 
-    if ((params->field_mask & UCT_IFACE_PARAM_FIELD_FEATURES) &&
-        !(params->features & UCT_IFACE_FEATURE_PUT)) {
-        self->flags |= UCT_DC_MLX5_IFACE_FLAG_DISABLE_PUT;
+    if (params->field_mask & UCT_IFACE_PARAM_FIELD_FEATURES) {
+        if (!(params->features & UCT_IFACE_FEATURE_PUT)) {
+            self->flags |= UCT_DC_MLX5_IFACE_FLAG_DISABLE_PUT;
+        }
     }
 
     UCT_DC_MLX5_CHECK_FORCE_FULL_HANDSHAKE(self, config, dci, DCI, status, err);

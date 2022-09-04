@@ -914,7 +914,7 @@ uct_test::entity::entity(const resource& resource, uct_md_config_t *md_config,
     }
 }
 
-void uct_test::entity::mem_alloc_host(size_t length,
+void uct_test::entity::mem_alloc_host(size_t length, unsigned flags,
                                       uct_allocated_memory_t *mem) const {
 
     void *address = NULL;
@@ -925,7 +925,7 @@ void uct_test::entity::mem_alloc_host(size_t length,
                              UCT_MEM_ALLOC_PARAM_FIELD_ADDRESS   |
                              UCT_MEM_ALLOC_PARAM_FIELD_MEM_TYPE  |
                              UCT_MEM_ALLOC_PARAM_FIELD_NAME;
-    params.flags           = UCT_MD_MEM_ACCESS_ALL;
+    params.flags           = UCT_MD_MEM_ACCESS_ALL | flags;
     params.name            = "uct_test";
     params.mem_type        = UCS_MEMORY_TYPE_HOST;
     params.address         = address;
@@ -1353,13 +1353,14 @@ std::ostream& operator<<(std::ostream& os, const uct_tl_resource_desc_t& resourc
 
 uct_test::mapped_buffer::mapped_buffer(size_t size, uint64_t seed,
                                        const entity& entity, size_t offset,
-                                       ucs_memory_type_t mem_type) :
+                                       ucs_memory_type_t mem_type,
+                                       unsigned flags) :
     m_entity(entity)
 {
     if (size > 0)  {
         size_t alloc_size = size + offset;
         if (mem_type == UCS_MEMORY_TYPE_HOST) {
-            m_entity.mem_alloc_host(alloc_size, &m_mem);
+            m_entity.mem_alloc_host(alloc_size, flags, &m_mem);
         } else {
             m_mem.method   = UCT_ALLOC_METHOD_LAST;
             m_mem.address  = mem_buffer::allocate(alloc_size, mem_type);

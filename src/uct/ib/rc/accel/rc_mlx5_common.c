@@ -104,7 +104,8 @@ uct_rc_mlx5_iface_update_srq_res(uct_rc_iface_t *iface, uct_ib_mlx5_srq_t *srq,
 }
 
 unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface,
-                                         uct_rc_mlx5_iface_set_seg_func set_seg)
+                                         uct_rc_mlx5_iface_set_seg_func set_seg,
+                                         unsigned poll_flags)
 {
     uct_ib_mlx5_srq_t *srq   = &iface->rx.srq;
     uct_rc_iface_t *rc_iface = &iface->super;
@@ -134,7 +135,7 @@ unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface,
             srq->free_idx  = next_index;
         }
 
-        if (set_seg(iface, seg) != UCS_OK) {
+        if (set_seg(iface, seg, poll_flags) != UCS_OK) {
             break;
         }
 
@@ -149,7 +150,8 @@ unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface,
 
 unsigned
 uct_rc_mlx5_iface_srq_post_recv_ll(uct_rc_mlx5_iface_common_t *iface,
-                                   uct_rc_mlx5_iface_set_seg_func set_seg)
+                                   uct_rc_mlx5_iface_set_seg_func set_seg,
+                                   unsigned poll_flags)
 {
     uct_ib_mlx5_srq_t *srq     = &iface->rx.srq;
     uct_rc_iface_t *rc_iface   = &iface->super;
@@ -169,7 +171,7 @@ uct_rc_mlx5_iface_srq_post_recv_ll(uct_rc_mlx5_iface_common_t *iface,
         }
         seg = uct_ib_mlx5_srq_get_wqe(srq, next_index);
 
-        if (set_seg(iface, seg) != UCS_OK) {
+        if (set_seg(iface, seg, poll_flags) != UCS_OK) {
             break;
         }
 
@@ -183,15 +185,21 @@ uct_rc_mlx5_iface_srq_post_recv_ll(uct_rc_mlx5_iface_common_t *iface,
 
 void uct_rc_mlx5_iface_common_prepost_recvs(uct_rc_mlx5_iface_common_t *iface)
 {
+    unsigned poll_flags = 0;
+
     /* prepost recvs only if quota available (recvs were not preposted
      * before) */
     if (iface->super.rx.srq.quota == 0) {
         return;
     }
 
+    if (iface->flags & UCT_RC_MLX5_IFACE_FLAG_SIG) {
+        poll_flags |= UCT_RC_MLX5_POLL_FLAG_SIG;
+    }
+
     iface->super.rx.srq.available = iface->super.rx.srq.quota;
     iface->super.rx.srq.quota     = 0;
-    uct_rc_mlx5_iface_srq_post_recv_common(iface);
+    uct_rc_mlx5_iface_srq_post_recv_common(iface, poll_flags);
 }
 
 #define UCT_RC_MLX5_DEFINE_ATOMIC_LE_HANDLER(_bits) \

@@ -492,6 +492,10 @@ typedef struct uct_ib_mlx5_md {
             struct ibv_cq      *ibv;
             uct_ib_mlx5_cq_t   mlx5;
         } cq;
+        struct {
+            struct mlx5dv_devx_obj     *obj;
+            uint32_t                   idx;
+        } psv;
     } umr; /* special stuff for creating UMR */
 
     struct {

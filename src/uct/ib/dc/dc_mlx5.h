@@ -97,7 +97,7 @@ typedef enum {
     UCT_DC_MLX5_IFACE_FLAG_DCT_FULL_HANDSHAKE       = UCS_BIT(5),
 
     /** Disable PUT capability (RDMA_WRITE) */
-    UCT_DC_MLX5_IFACE_FLAG_DISABLE_PUT              = UCS_BIT(6)
+    UCT_DC_MLX5_IFACE_FLAG_DISABLE_PUT              = UCS_BIT(6),
 } uct_dc_mlx5_iface_flags_t;
 
 

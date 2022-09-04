@@ -11,31 +11,11 @@
 #include <uct/ib/mlx5/ib_mlx5.h>
 #include <uct/ib/rc/accel/rc_mlx5.inl>
 #include "ib_mlx5_ifc.h"
+#include "ib_mlx5_def.h"
+#include "sig.h"
 
 #include <ucs/arch/bitops.h>
 #include <ucs/profile/profile.h>
-
-typedef struct {
-    struct mlx5dv_devx_obj     *dvmr;
-    int                        mr_num;
-    size_t                     length;
-    struct ibv_mr              *mrs[];
-} uct_ib_mlx5_ksm_data_t;
-
-typedef union uct_ib_mlx5_mr {
-    uct_ib_mr_t                super;
-    uct_ib_mlx5_ksm_data_t     *ksm_data;
-} uct_ib_mlx5_mr_t;
-
-typedef struct uct_ib_mlx5_mem {
-    uct_ib_mem_t               super;
-#if HAVE_DEVX
-    struct mlx5dv_devx_obj     *atomic_dvmr;
-    struct mlx5dv_devx_obj     *indirect_dvmr;
-#endif
-    uct_ib_mlx5_mr_t           mrs[];
-} uct_ib_mlx5_mem_t;
-
 
 static ucs_status_t uct_ib_mlx5_reg_key(uct_ib_md_t *md, void *address,
                                         size_t length, uint64_t access_flags,
@@ -121,7 +101,7 @@ static int uct_ib_mlx5_has_roce_port(uct_ib_device_t *dev)
 static void uct_ib_mlx5_parse_relaxed_order(uct_ib_mlx5_md_t *md,
                                             const uct_ib_md_config_t *md_config)
 {
-    int num_mrs = 1;  /* UCT_IB_MR_DEFAULT */
+    int num_mrs = 2;  /* UCT_IB_MR_DEFAULT + UCT_IB_MR_SIG */
 
     uct_ib_md_parse_relaxed_order(&md->super, md_config);
 
@@ -1243,6 +1223,12 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
         goto err_cq_destroy;
     }
 
+    status = uct_ib_mlx5_create_psv(md->super.pd, &md->umr.psv.obj,
+                                    &md->umr.psv.idx);
+    if (status != UCS_OK) {
+        goto err_umr_qp;
+    }
+
     ucs_debug("%s: opened DEVX md", ibv_get_device_name(ibv_device));
 
     dev->flags     |= UCT_IB_DEVICE_FLAG_MLX5_PRM;
@@ -1267,6 +1253,8 @@ static ucs_status_t uct_ib_mlx5_devx_md_open(struct ibv_device *ibv_device,
     *p_md = &md->super;
     return UCS_OK;
 
+err_umr_qp:
+    uct_ib_mlx5_devx_destroy_qp(md, &md->umr.txwq.super);
 err_cq_destroy:
     ibv_destroy_cq(md->umr.cq.ibv);
 err_release_dbrec:
@@ -1298,6 +1286,7 @@ static void uct_ib_mlx5_devx_md_cleanup(uct_ib_md_t *ibmd)
 
     uct_ib_mlx5_devx_mr_lru_cleanup(md);
     uct_ib_mlx5_devx_cleanup_flush_mr(md);
+    uct_ib_mlx5_destroy_psv(md->umr.psv.obj);
     uct_ib_mlx5_devx_destroy_qp(md, &md->umr.txwq.super);
     ibv_destroy_cq(md->umr.cq.ibv);
     uct_ib_mlx5_md_buf_free(md, md->zero_buf, &md->zero_mem);

@@ -56,9 +56,10 @@ enum {
     UCT_IB_MEM_MULTITHREADED         = UCS_BIT(3), /**< The memory region registration
                                                         handled by chunks in parallel
                                                         threads */
-    UCT_IB_MEM_FLAG_RELAXED_ORDERING = UCS_BIT(4)  /**< The memory region will issue
+    UCT_IB_MEM_FLAG_RELAXED_ORDERING = UCS_BIT(4), /**< The memory region will issue
                                                         PCIe writes with relaxed order
                                                         attribute */
+    UCT_IB_MEM_SIG                   = UCS_BIT(5)
 };
 
 enum {
@@ -112,6 +113,7 @@ typedef union uct_ib_mr {
 typedef enum {
     /* Default memory region with either strict or relaxed order */
     UCT_IB_MR_DEFAULT,
+    UCT_IB_MR_SIG,
     /* Additional memory region with strict order,
      * if the default region is relaxed order */
     UCT_IB_MR_STRICT_ORDER,

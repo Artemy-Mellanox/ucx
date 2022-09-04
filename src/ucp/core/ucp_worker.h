@@ -101,7 +101,7 @@ enum {
 
     /** Indicates that AM mpool was initialized on this worker */
     UCP_WORKER_FLAG_AM_MPOOL_INITIALIZED =
-            UCS_BIT(UCP_WORKER_INTERNAL_FLAGS_SHIFT + 4)
+            UCS_BIT(UCP_WORKER_INTERNAL_FLAGS_SHIFT + 4),
 };
 
 

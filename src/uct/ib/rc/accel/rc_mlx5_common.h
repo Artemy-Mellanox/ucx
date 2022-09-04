@@ -133,8 +133,14 @@ enum {
     UCT_RC_MLX5_POLL_FLAG_TM                 = UCS_BIT(0),
     UCT_RC_MLX5_POLL_FLAG_HAS_EP             = UCS_BIT(1),
     UCT_RC_MLX5_POLL_FLAG_TAG_CQE            = UCS_BIT(2),
-    UCT_RC_MLX5_POLL_FLAG_LINKED_LIST        = UCS_BIT(3)
+    UCT_RC_MLX5_POLL_FLAG_LINKED_LIST        = UCS_BIT(3),
+    UCT_RC_MLX5_POLL_FLAG_SIG                = UCS_BIT(4)
 };
+
+
+typedef enum {
+    UCT_RC_MLX5_IFACE_FLAG_SIG               = UCS_BIT(0),
+} uct_rc_mlx5_iface_flags_t;
 
 
 #define UCT_RC_MLX5_RMA_MAX_IOV(_av_size) \
@@ -425,6 +431,9 @@ typedef struct uct_rc_mlx5_iface_common {
         uint8_t                        log_ack_req_freq;
     } config;
     UCS_STATS_NODE_DECLARE(stats)
+
+    /* iface flags, see uct_rc_mlx5_iface_flags_t */
+    uint16_t                           flags;
 } uct_rc_mlx5_iface_common_t;
 
 /**
@@ -580,13 +589,16 @@ extern ucs_config_field_t uct_rc_mlx5_common_config_table[];
 
 typedef ucs_status_t
 uct_rc_mlx5_iface_set_seg_func(uct_rc_mlx5_iface_common_t *iface,
-                               uct_ib_mlx5_srq_seg_t *seg);
+                               uct_ib_mlx5_srq_seg_t *seg,
+                               unsigned poll_flags);
 unsigned
 uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface,
-                                uct_rc_mlx5_iface_set_seg_func set_seg);
+                                uct_rc_mlx5_iface_set_seg_func set_seg,
+                                unsigned poll_flags);
 unsigned
 uct_rc_mlx5_iface_srq_post_recv_ll(uct_rc_mlx5_iface_common_t *iface,
-                                   uct_rc_mlx5_iface_set_seg_func set_seg);
+                                   uct_rc_mlx5_iface_set_seg_func set_seg,
+                                   unsigned poll_flags);
 
 void uct_rc_mlx5_iface_common_prepost_recvs(uct_rc_mlx5_iface_common_t *iface);
 

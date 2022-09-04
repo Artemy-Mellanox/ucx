@@ -99,6 +99,40 @@ uct_ib_mlx5_check_and_init_zipped(uct_ib_mlx5_cq_t *cq, struct mlx5_cqe64 *cqe)
 
 
 static UCS_F_ALWAYS_INLINE struct mlx5_cqe64*
+uct_ib_mlx5_peek_cq(uct_ib_mlx5_cq_t *cq, int *err_p)
+{
+    struct mlx5_cqe64 *cqe;
+    unsigned cqe_index;
+    uint8_t op_own;
+
+    cqe_index = cq->cq_ci;
+    cqe       = uct_ib_mlx5_get_cqe(cq, cqe_index);
+    op_own    = cqe->op_own;
+
+    if (ucs_unlikely(uct_ib_mlx5_cqe_is_hw_owned(op_own, cqe_index, cq->cq_length))) {
+        return NULL;
+    }
+
+    ucs_log_dump_hex_buf(cqe, sizeof(struct mlx5_cqe64));
+    if (ucs_unlikely(op_own & UCT_IB_MLX5_CQE_OP_OWN_ERR_MASK)) {
+        switch (op_own >> 4) {
+        case MLX5_CQE_INVALID:
+            ucs_fatal("CQE invalid");
+        case MLX5_CQE_RESP_ERR:
+        case MLX5_CQE_REQ_ERR:
+            ++cq->cq_ci;
+        }
+        uct_ib_mlx5_update_db_cq_ci(cq);
+        *err_p = 1;
+    } else {
+        cq->cq_ci = cqe_index + 1;
+    }
+
+    return cqe;
+}
+
+
+static UCS_F_ALWAYS_INLINE struct mlx5_cqe64*
 uct_ib_mlx5_poll_cq(uct_ib_iface_t *iface, uct_ib_mlx5_cq_t *cq)
 {
     struct mlx5_cqe64 *cqe;
@@ -264,6 +298,16 @@ uct_ib_mlx5_txwq_wrap_data(uct_ib_mlx5_txwq_t *txwq, void *data)
                                                             txwq->qend));
     }
     return data;
+}
+
+
+static UCS_F_ALWAYS_INLINE size_t
+uct_ib_mlx5_txwq_diff(uct_ib_mlx5_txwq_t *txwq, void *start, void *end)
+{
+    if (start < end) {
+        return UCS_PTR_BYTE_DIFF(start, end);
+    }
+    return UCS_PTR_BYTE_DIFF(start, end) + UCS_PTR_BYTE_DIFF(txwq->qstart, txwq->qend);
 }
 
 

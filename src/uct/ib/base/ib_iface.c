@@ -228,7 +228,6 @@ void uct_ib_iface_recv_desc_init(uct_iface_h tl_iface, void *obj,
     uct_ib_iface_recv_desc_t *desc = obj;
 
     desc->header_lkey  = uct_ib_memh_get_lkey(memh);
-    desc->payload_lkey = 0;
     desc->payload      = NULL;
 }
 
