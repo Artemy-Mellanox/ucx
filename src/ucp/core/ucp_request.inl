@@ -796,16 +796,17 @@ ucp_recv_desc_set_name(ucp_recv_desc_t *rdesc, const char *name)
 #endif
 }
 
-static UCS_F_ALWAYS_INLINE ucs_status_t
-ucp_recv_desc_init(ucp_worker_h worker, void *data, size_t length,
-                   int data_offset, unsigned am_flags, uint16_t hdr_len,
-                   uint16_t rdesc_flags, int priv_length, size_t alignment,
-                   const char *name, ucp_recv_desc_t **rdesc_p)
+static UCS_F_ALWAYS_INLINE ucs_status_t ucp_recv_desc_init_new(
+        ucp_worker_h worker, void *data, size_t length, int data_offset,
+        unsigned am_flags, uint16_t hdr_len, uint16_t rdesc_flags,
+        int priv_length, size_t alignment, uct_am_callback_params_t *params,
+        const char *name, ucp_recv_desc_t **rdesc_p)
 {
     ucp_recv_desc_t *rdesc;
     void *data_hdr;
     ucs_status_t status;
     size_t padding;
+    void *dest;
 
     if (ucs_unlikely(am_flags & UCT_CB_PARAM_FLAG_DESC)) {
         /* slowpath */
@@ -832,7 +833,12 @@ ucp_recv_desc_init(ucp_worker_h worker, void *data, size_t length,
          * needed for releasing UCT descriptor. */
         rdesc->flags = rdesc_flags;
         status       = UCS_OK;
-        memcpy(UCS_PTR_BYTE_OFFSET(rdesc + 1, data_offset), data, length);
+        dest = UCS_PTR_BYTE_OFFSET(rdesc + 1, data_offset);
+        memcpy(dest, data, sizeof(ucp_am_hdr_t));
+        if (length > sizeof(ucp_am_hdr_t)) {
+            dest = UCS_PTR_BYTE_OFFSET(dest, sizeof(ucp_am_hdr_t));
+            memcpy(dest, params->payload, length - sizeof(ucp_am_hdr_t));
+        }
     }
 
     ucp_recv_desc_set_name(rdesc, name);
@@ -840,6 +846,17 @@ ucp_recv_desc_init(ucp_worker_h worker, void *data, size_t length,
     rdesc->payload_offset = hdr_len;
     *rdesc_p              = rdesc;
     return status;
+}
+
+static UCS_F_ALWAYS_INLINE ucs_status_t
+ucp_recv_desc_init(ucp_worker_h worker, void *data, size_t length,
+                   int data_offset, unsigned am_flags, uint16_t hdr_len,
+                   uint16_t rdesc_flags, int priv_length, size_t alignment,
+                   const char *name, ucp_recv_desc_t **rdesc_p)
+{
+    return ucp_recv_desc_init_new(worker, data, length, data_offset, am_flags,
+                                  hdr_len, rdesc_flags, priv_length, alignment,
+                                  NULL, name, rdesc_p);
 }
 
 static UCS_F_ALWAYS_INLINE void

@@ -40,6 +40,7 @@
 #include <string.h>
 
 
+#define UCT_IB_MLX5_TERMINATE_SCATTER_LIST_MKEY 0x100
 #define UCT_IB_MLX5_WQE_SEG_SIZE         16 /* Size of a segment in a WQE */
 #define UCT_IB_MLX5_CQE64_MAX_INL        32 /* Inline scatter size in 64-byte CQE */
 #define UCT_IB_MLX5_CQE128_MAX_INL       64 /* Inline scatter size in 128-byte CQE */
@@ -694,10 +695,10 @@ ucs_status_t uct_ib_mlx5_get_rxwq(struct ibv_qp *qp, uct_ib_mlx5_rxwq_t *wq);
  */
 ucs_status_t
 uct_ib_mlx5_verbs_srq_init(uct_ib_mlx5_srq_t *srq, struct ibv_srq *verbs_srq,
-                           size_t sg_byte_count, int num_sge);
+                           size_t *sg_byte_count, int num_sge);
 
 void uct_ib_mlx5_srq_buff_init(uct_ib_mlx5_srq_t *srq, uint32_t head,
-                               uint32_t tail, size_t sg_byte_count, int num_sge);
+                               uint32_t tail, size_t *sg_byte_count, int num_sge);
 
 void uct_ib_mlx5_verbs_srq_cleanup(uct_ib_mlx5_srq_t *srq, struct ibv_srq *verbs_srq);
 

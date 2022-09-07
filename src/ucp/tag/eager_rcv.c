@@ -135,8 +135,8 @@ ucp_eager_tagged_handler(void *arg, void *data, size_t length, unsigned am_flags
 }
 
 UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_only_handler,
-                 (arg, data, length, am_flags, params), void *arg, void *data,
-                 size_t length, unsigned am_flags,
+                 (arg, data, length, am_flags, params),
+                 void *arg, void *data, size_t length, unsigned am_flags,
                  uct_am_callback_params_t *params)
 {
     return ucp_eager_tagged_handler(arg, data, length, am_flags,
@@ -147,8 +147,8 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_only_handler,
 }
 
 UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_first_handler,
-                 (arg, data, length, am_flags, params), void *arg, void *data,
-                 size_t length, unsigned am_flags,
+                 (arg, data, length, am_flags, params),
+                 void *arg, void *data, size_t length, unsigned am_flags,
                  uct_am_callback_params_t *params)
 {
     return ucp_eager_tagged_handler(arg, data, length, am_flags,
@@ -159,8 +159,8 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_first_handler,
 
 /* Handler for middle fragments of SW eager messages */
 UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_middle_handler,
-                 (arg, data, length, am_flags, params), void *arg, void *data,
-                 size_t length, unsigned am_flags,
+                 (arg, data, length, am_flags, params),
+                 void *arg, void *data, size_t length, unsigned am_flags,
                  uct_am_callback_params_t *params)
 {
     ucp_worker_h worker         = arg;
@@ -226,8 +226,8 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_middle_handler,
 }
 
 UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_sync_only_handler,
-                 (arg, data, length, am_flags, params), void *arg, void *data,
-                 size_t length, unsigned am_flags,
+                 (arg, data, length, am_flags, params),
+                 void *arg, void *data, size_t length, unsigned am_flags,
                  uct_am_callback_params_t *params)
 {
     return ucp_eager_tagged_handler(arg, data, length, am_flags,
@@ -239,8 +239,8 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_sync_only_handler,
 }
 
 UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_sync_first_handler,
-                 (arg, data, length, am_flags, params), void *arg, void *data,
-                 size_t length, unsigned am_flags,
+                 (arg, data, length, am_flags, params),
+                 void *arg, void *data, size_t length, unsigned am_flags,
                  uct_am_callback_params_t *params)
 {
     return ucp_eager_tagged_handler(arg, data, length, am_flags,
@@ -251,8 +251,8 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_sync_first_handler,
 }
 
 UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_offload_sync_ack_handler,
-                 (arg, data, length, am_flags, params), void *arg, void *data,
-                 size_t length, unsigned am_flags,
+                 (arg, data, length, am_flags, params),
+                 void *arg, void *data, size_t length, unsigned am_flags,
                  uct_am_callback_params_t *params)
 {
     ucp_offload_ssend_hdr_t *rep_hdr = data;
@@ -279,8 +279,8 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_offload_sync_ack_handler,
 }
 
 UCS_PROFILE_FUNC(ucs_status_t, ucp_eager_sync_ack_handler,
-                 (arg, data, length, am_flags, params), void *arg, void *data,
-                 size_t length, unsigned am_flags,
+                 (arg, data, length, am_flags, params),
+                 void *arg, void *data, size_t length, unsigned am_flags,
                  uct_am_callback_params_t *params)
 {
     ucp_worker_h    worker   = arg;

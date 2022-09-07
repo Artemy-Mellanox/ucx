@@ -1066,10 +1066,14 @@ void uct_dc_mlx5_fc_entry_iter_del(uct_dc_mlx5_iface_t *iface, khiter_t it)
 static ucs_status_t
 uct_dc_mlx5_iface_fc_handler(uct_rc_iface_t *rc_iface, unsigned qp_num,
                              uct_rc_hdr_t *hdr, unsigned length,
-                             uint32_t imm_data, uint16_t lid, unsigned flags)
+                             uint32_t imm_data, uint16_t lid, unsigned flags,
+                             uct_am_callback_params_t *params)
 {
     uct_dc_mlx5_iface_t *iface = ucs_derived_of(rc_iface, uct_dc_mlx5_iface_t);
-    uint8_t fc_hdr             = uct_rc_fc_get_fc_hdr(hdr->am_id);
+    size_t client_hdr_len = rc_iface->super.super.rx_allocator.header_length;
+    size_t tl_desc_hdr_part_length = sizeof(*hdr) + client_hdr_len;
+    size_t concatenated_hdr_length = length + sizeof(*hdr);
+    uint8_t fc_hdr;
     uct_dc_fc_sender_data_t *sender;
     uct_dc_fc_request_t *dc_req;
     int16_t cur_wnd;
@@ -1080,8 +1084,19 @@ uct_dc_mlx5_iface_fc_handler(uct_rc_iface_t *rc_iface, unsigned qp_num,
     ucs_arbiter_group_t *group;
     uint8_t pool_index;
     char buf[128];
+    uct_rc_hdr_t *concatenated_hdr;
 
     ucs_assert(rc_iface->config.fc_enabled);
+
+    concatenated_hdr = ucs_alloca(concatenated_hdr_length);
+    memcpy(concatenated_hdr, hdr, tl_desc_hdr_part_length);
+    if (concatenated_hdr_length > tl_desc_hdr_part_length) {
+        memcpy(UCS_PTR_BYTE_OFFSET(concatenated_hdr, tl_desc_hdr_part_length),
+               params->payload,
+               concatenated_hdr_length - tl_desc_hdr_part_length);
+    }
+    hdr    = concatenated_hdr;
+    fc_hdr = uct_rc_fc_get_fc_hdr(hdr->am_id);
 
     if (fc_hdr == UCT_RC_EP_FLAG_FC_HARD_REQ) {
         ep = iface->tx.fc_ep;

@@ -28,7 +28,8 @@ static const char *uct_rc_fence_mode_values[] = {
 };
 
 ucs_config_field_t uct_rc_iface_common_config_table[] = {
-  {UCT_IB_CONFIG_PREFIX, "RX_INLINE=64;TX_INLINE_RESP=64;RX_QUEUE_LEN=4095;SEG_SIZE=8256", NULL,
+  //scatter2cqe is not supported by new AM handlers handling non contiguous rx descriptor.
+  {UCT_IB_CONFIG_PREFIX, "RX_INLINE=0;TX_INLINE_RESP=64;RX_QUEUE_LEN=4095;SEG_SIZE=8256", NULL,
    ucs_offsetof(uct_rc_iface_common_config_t, super),
    UCS_CONFIG_TYPE_TABLE(uct_ib_iface_config_table)},
 
@@ -351,7 +352,9 @@ ucs_status_t uct_rc_init_fc_thresh(uct_rc_iface_config_t *config,
 
 ucs_status_t uct_rc_iface_fc_handler(uct_rc_iface_t *iface, unsigned qp_num,
                                      uct_rc_hdr_t *hdr, unsigned length,
-                                     uint32_t imm_data, uint16_t lid, unsigned flags)
+                                     uint32_t imm_data, uint16_t lid,
+                                     unsigned flags,
+                                     uct_am_callback_params_t *params)
 {
     ucs_status_t status;
     int16_t      cur_wnd;
@@ -427,8 +430,8 @@ ucs_status_t uct_rc_iface_fc_handler(uct_rc_iface_t *iface, unsigned qp_num,
 
 out:
     return uct_iface_invoke_am(&iface->super.super,
-                               (hdr->am_id & ~UCT_RC_EP_FC_MASK),
-                               hdr + 1, length, flags, NULL);
+                               (hdr->am_id & ~UCT_RC_EP_FC_MASK), hdr + 1,
+                               length, flags, params);
 }
 
 static ucs_status_t uct_rc_iface_tx_ops_init(uct_rc_iface_t *iface)
@@ -499,7 +502,7 @@ ucs_status_t uct_rc_iface_init_rx(uct_rc_iface_t *iface,
     struct ibv_pd *pd = uct_ib_iface_md(&iface->super)->pd;
     struct ibv_srq *srq;
 
-    srq_init_attr.attr.max_sge   = 1;
+    srq_init_attr.attr.max_sge   = UCT_IB_RECV_SG_LIST_LEN;
     srq_init_attr.attr.max_wr    = config->super.rx.queue_len;
     srq_init_attr.attr.srq_limit = 0;
     srq_init_attr.srq_context    = iface;
@@ -554,6 +557,44 @@ uct_rc_iface_init_max_rd_atomic(uct_rc_iface_t *iface,
     }
 
     return UCS_OK;
+}
+
+static ucs_status_t
+uct_rc_iface_recv_mpool_init(uct_ib_iface_t *iface,
+                             const uct_ib_iface_config_t *config,
+                             const uct_iface_params_t *params, const char *name,
+                             ucs_mpool_t *tl_hdr_mpool)
+{
+    size_t align_offset, alignment;
+    ucs_status_t status;
+    unsigned grow;
+
+    if (config->rx.queue_len < 1024) {
+        grow = 1024;
+    } else {
+        /* We want to have some free (+10%) elements to avoid mem pool expansion */
+        grow = ucs_min((int)(1.1 * config->rx.queue_len + 0.5),
+                       config->rx.mp.max_bufs);
+    }
+
+    /* Preserve the default alignment by UCT header if user does not request
+     * specific alignment.
+     * TODO: Analyze how to keep UCT header aligned by cache line even when
+     * user requested specific alignment for payload.
+     */
+    status = uct_iface_param_am_alignment(params,
+                                          iface->config.rx_payload_offset, 0,
+                                          iface->config.rx_hdr_offset,
+                                          &alignment, &align_offset);
+    if (status != UCS_OK) {
+        return status;
+    }
+
+    return uct_iface_mpool_init(&iface->super, tl_hdr_mpool,
+                                iface->config.rx_payload_offset +
+                                        iface->super.rx_allocator.header_length,
+                                align_offset, alignment, &config->rx.mp, grow,
+                                uct_ib_iface_recv_desc_init, name);
 }
 
 UCS_CLASS_INIT_FUNC(uct_rc_iface_t, uct_iface_ops_t *tl_ops,
@@ -652,9 +693,11 @@ UCS_CLASS_INIT_FUNC(uct_rc_iface_t, uct_iface_ops_t *tl_ops,
         goto err;
     }
 
-    /* Create RX buffers mempool */
-    status = uct_ib_iface_recv_mpool_init(&self->super, &config->super, params,
-                                          "rc_recv_desc", &self->rx.mp);
+    // TODO - Ask Yossi how determine if Tag Matching is enabled
+
+    /* Create RX buffers mempool For SGE*/
+    status = uct_rc_iface_recv_mpool_init(&self->super, &config->super, params,
+                                          "rc_recv_tl_hdr", &self->rx.mp);
     if (status != UCS_OK) {
         goto err;
     }
@@ -819,7 +862,7 @@ void uct_rc_iface_fill_attr(uct_rc_iface_t *iface, uct_ib_qp_attr_t *attr,
     attr->cap.max_send_wr            = max_send_wr;
     attr->cap.max_recv_wr            = 0;
     attr->cap.max_send_sge           = iface->config.tx_min_sge;
-    attr->cap.max_recv_sge           = 1;
+    attr->cap.max_recv_sge           = UCT_IB_RECV_SG_LIST_LEN;
     attr->cap.max_inline_data        = iface->config.tx_min_inline;
     attr->qp_type                    = iface->super.config.qp_type;
     attr->sq_sig_all                 = !iface->config.tx_moderation;

@@ -222,12 +222,14 @@ int uct_ib_iface_is_ib(uct_ib_iface_t *iface)
                                     iface->config.port_num);
 }
 
-static void
-uct_ib_iface_recv_desc_init(uct_iface_h tl_iface, void *obj, uct_mem_h memh)
+void uct_ib_iface_recv_desc_init(uct_iface_h tl_iface, void *obj,
+                                 uct_mem_h memh)
 {
     uct_ib_iface_recv_desc_t *desc = obj;
 
-    desc->lkey = uct_ib_memh_get_lkey(memh);
+    desc->header_lkey  = uct_ib_memh_get_lkey(memh);
+    desc->payload_lkey = 0;
+    desc->payload      = NULL;
 }
 
 ucs_status_t uct_ib_iface_recv_mpool_init(uct_ib_iface_t *iface,
@@ -1424,7 +1426,7 @@ int uct_ib_iface_prepare_rx_wrs(uct_ib_iface_t *iface, ucs_mpool_t *mp,
         UCT_TL_IFACE_GET_RX_DESC(&iface->super, mp, desc, break);
         wrs[count].sg.addr   = (uintptr_t)uct_ib_iface_recv_desc_hdr(iface, desc);
         wrs[count].sg.length = iface->config.seg_size;
-        wrs[count].sg.lkey   = desc->lkey;
+        wrs[count].sg.lkey   = desc->header_lkey;
         wrs[count].ibwr.num_sge = 1;
         wrs[count].ibwr.wr_id   = (uintptr_t)desc;
         wrs[count].ibwr.sg_list = &wrs[count].sg;
