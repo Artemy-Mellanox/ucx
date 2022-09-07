@@ -555,7 +555,7 @@ out_tm_disabled:
 #endif
     init_attr->cq_len[UCT_IB_DIR_RX] = rc_config->super.rx.queue_len;
     init_attr->seg_size              = rc_config->super.seg_size;
-    iface->tm.mp.num_strides         = 1;
+    iface->tm.mp.num_strides         = UCT_IB_RECV_SG_LIST_LEN;
 
 #if IBV_HW_TM
 out_mp_disabled:
@@ -718,6 +718,8 @@ UCS_CLASS_INIT_FUNC(uct_rc_mlx5_iface_common_t, uct_iface_ops_t *tl_ops,
     if (status != UCS_OK) {
         return status;
     }
+
+    ucs_assertv(!UCT_RC_MLX5_MP_ENABLED(self), "Tag matching is not supported\n");
 
     self->rx.srq.type                = UCT_IB_MLX5_OBJ_TYPE_LAST;
     self->tm.cmd_wq.super.super.type = UCT_IB_MLX5_OBJ_TYPE_LAST;

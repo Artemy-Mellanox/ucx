@@ -186,7 +186,7 @@ uct_ud_mlx5_iface_post_recv(uct_ud_mlx5_iface_t *iface)
         ucs_prefetch(rx_wqes + next_pi);
         UCT_TL_IFACE_GET_RX_DESC(&iface->super.super.super, &iface->super.rx.mp,
                                  desc, break);
-        rx_wqes[pi].lkey = htonl(desc->lkey);
+        rx_wqes[pi].lkey = htonl(desc->header_lkey);
         rx_wqes[pi].addr = htobe64((uintptr_t)uct_ib_iface_recv_desc_hdr(&iface->super.super, desc));
         pi = next_pi;
     }
@@ -718,8 +718,8 @@ static void uct_ud_mlx5_qp_update_caps(struct ibv_qp_cap *qp_caps)
 {
     /* Set minimal possible values for max_send_sge, max_recv_sge and
      * max_inline_data to minimize WQE length */
-    qp_caps->max_recv_sge    = 1;
-    qp_caps->max_send_sge    = 2; /* UD header + payload */
+    qp_caps->max_recv_sge    = UCT_IB_RECV_SG_LIST_LEN;
+    qp_caps->max_send_sge    = 1; /* UD header + payload */
     qp_caps->max_inline_data = 0;
 }
 
@@ -950,8 +950,8 @@ static UCS_CLASS_INIT_FUNC(uct_ud_mlx5_iface_t, uct_md_h tl_md,
 
     /* write buffer sizes */
     for (i = 0; i <= self->rx.wq.mask; i++) {
-        self->rx.wq.wqes[i].byte_count = 
-                htonl(self->super.super.config.seg_size);
+        self->rx.wq.wqes[i].byte_count = htonl(
+                self->super.super.config.seg_size);
     }
 
     while (self->super.rx.available >= self->super.super.config.rx_max_batch) {

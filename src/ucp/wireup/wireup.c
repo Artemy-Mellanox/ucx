@@ -794,18 +794,19 @@ void ucp_wireup_process_ack(ucp_worker_h worker, ucp_ep_h ep,
     ucp_wireup_remote_connected(ep);
 }
 
-static ucs_status_t ucp_wireup_msg_handler(void *arg, void *data, size_t length,
-                                           unsigned flags,
+static ucs_status_t ucp_wireup_msg_handler(void *arg, void *data,
+                                           size_t length, unsigned flags,
                                            uct_am_callback_params_t *params)
 {
-    ucp_worker_h worker   = arg;
-    ucp_wireup_msg_t *msg = data;
-    ucp_ep_h ep           = NULL;
+    ucp_worker_h worker = arg;
+    ucp_ep_h ep         = NULL;
     ucp_unpacked_address_t remote_address;
+    ucp_wireup_msg_t *msg;
     ucs_status_t status;
 
     UCS_ASYNC_BLOCK(&worker->async);
 
+    UCP_AM_CONCAT_MSG_HDR(data, params->payload, length, msg);
     if (msg->dst_ep_id != UCS_PTR_MAP_KEY_INVALID) {
         UCP_WORKER_GET_EP_BY_ID(
                 &ep, worker, msg->dst_ep_id,

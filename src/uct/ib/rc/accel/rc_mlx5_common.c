@@ -86,33 +86,6 @@ ucs_config_field_t uct_rc_mlx5_common_config_table[] = {
 };
 
 
-static UCS_F_ALWAYS_INLINE ucs_status_t
-uct_rc_mlx5_iface_srq_set_seg(uct_rc_mlx5_iface_common_t *iface,
-                              uct_ib_mlx5_srq_seg_t *seg)
-{
-    uct_ib_iface_recv_desc_t *desc;
-    uint64_t desc_map;
-    void *hdr;
-    int i;
-
-    desc_map = ~seg->srq.ptr_mask & UCS_MASK(iface->tm.mp.num_strides);
-    ucs_for_each_bit(i, desc_map) {
-        UCT_TL_IFACE_GET_RX_DESC(&iface->super.super.super, &iface->super.rx.mp,
-                                 desc, return UCS_ERR_NO_MEMORY);
-
-        /* Set receive data segment pointer. Length is pre-initialized. */
-        hdr                = uct_ib_iface_recv_desc_hdr(&iface->super.super,
-                                                        desc);
-        seg->srq.ptr_mask |= UCS_BIT(i);
-        seg->srq.desc      = desc; /* Optimization for non-MP case (1 stride) */
-        seg->dptr[i].lkey  = htonl(desc->lkey);
-        seg->dptr[i].addr  = htobe64((uintptr_t)hdr);
-        VALGRIND_MAKE_MEM_NOACCESS(hdr, iface->super.super.config.seg_size);
-    }
-
-    return UCS_OK;
-}
-
 /* Update resources and write doorbell record */
 static UCS_F_ALWAYS_INLINE void
 uct_rc_mlx5_iface_update_srq_res(uct_rc_iface_t *iface, uct_ib_mlx5_srq_t *srq,
@@ -131,7 +104,8 @@ uct_rc_mlx5_iface_update_srq_res(uct_rc_iface_t *iface, uct_ib_mlx5_srq_t *srq,
     *srq->db                    = htonl(srq->sw_pi);
 }
 
-unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface)
+unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface,
+                                         uct_rc_mlx5_iface_set_seg_func set_seg)
 {
     uct_ib_mlx5_srq_t *srq   = &iface->rx.srq;
     uct_rc_iface_t *rc_iface = &iface->super;
@@ -161,7 +135,7 @@ unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface)
             srq->free_idx  = next_index;
         }
 
-        if (uct_rc_mlx5_iface_srq_set_seg(iface, seg) != UCS_OK) {
+        if (set_seg(iface, seg) != UCS_OK) {
             break;
         }
 
@@ -174,7 +148,9 @@ unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface)
     return count;
 }
 
-unsigned uct_rc_mlx5_iface_srq_post_recv_ll(uct_rc_mlx5_iface_common_t *iface)
+unsigned
+uct_rc_mlx5_iface_srq_post_recv_ll(uct_rc_mlx5_iface_common_t *iface,
+                                   uct_rc_mlx5_iface_set_seg_func set_seg)
 {
     uct_ib_mlx5_srq_t *srq     = &iface->rx.srq;
     uct_rc_iface_t *rc_iface   = &iface->super;
@@ -194,7 +170,7 @@ unsigned uct_rc_mlx5_iface_srq_post_recv_ll(uct_rc_mlx5_iface_common_t *iface)
         }
         seg = uct_ib_mlx5_srq_get_wqe(srq, next_index);
 
-        if (uct_rc_mlx5_iface_srq_set_seg(iface, seg) != UCS_OK) {
+        if (set_seg(iface, seg) != UCS_OK) {
             break;
         }
 
@@ -216,7 +192,7 @@ void uct_rc_mlx5_iface_common_prepost_recvs(uct_rc_mlx5_iface_common_t *iface)
 
     iface->super.rx.srq.available = iface->super.rx.srq.quota;
     iface->super.rx.srq.quota     = 0;
-    uct_rc_mlx5_iface_srq_post_recv(iface);
+    uct_rc_mlx5_iface_srq_post_recv_common(iface);
 }
 
 #define UCT_RC_MLX5_DEFINE_ATOMIC_LE_HANDLER(_bits) \
@@ -553,6 +529,7 @@ uct_rc_mlx5_common_iface_init_rx(uct_rc_mlx5_iface_common_t *iface,
 {
     uct_ib_mlx5_md_t *md = ucs_derived_of(iface->super.super.super.md, uct_ib_mlx5_md_t);
     ucs_status_t status;
+    size_t sg_byte_count[16];
 
     ucs_assert(iface->config.srq_topo != UCT_RC_MLX5_SRQ_TOPO_CYCLIC);
 
@@ -562,8 +539,9 @@ uct_rc_mlx5_common_iface_init_rx(uct_rc_mlx5_iface_common_t *iface,
         goto err;
     }
 
+    uct_ib_mlx5_srq_init_sg_byte_counts(iface, sg_byte_count);
     status = uct_ib_mlx5_verbs_srq_init(&iface->rx.srq, iface->rx.srq.verbs.srq,
-                                        iface->super.super.config.seg_size,
+                                        sg_byte_count,
                                         iface->tm.mp.num_strides);
     if (status != UCS_OK) {
         goto err_free_srq;
@@ -599,7 +577,17 @@ void uct_rc_mlx5_release_desc(uct_recv_desc_t *self, void *desc)
 {
     uct_rc_mlx5_release_desc_t *release = ucs_derived_of(self,
                                                          uct_rc_mlx5_release_desc_t);
-    void *ib_desc = (char*)desc - release->offset;
+    uct_rc_mlx5_iface_common_t *iface =
+            ucs_container_of(release, uct_rc_mlx5_iface_common_t, tm.am_desc);
+    uct_ib_iface_recv_desc_t *ib_desc = UCS_PTR_BYTE_OFFSET(desc,
+                                                            -release->offset);
+    void *payload_desc;
+
+    if (ucs_unlikely(!iface->super.super.super.rx_allocator.user_allocator)) {
+        payload_desc = UCS_PTR_BYTE_OFFSET(ib_desc->payload,
+                                           -sizeof(uct_iface_recv_desc_t));
+        ucs_mpool_put_inline(payload_desc);
+    }
     ucs_mpool_put_inline(ib_desc);
 }
 
@@ -859,6 +847,7 @@ ucs_status_t uct_rc_mlx5_init_rx_tm(uct_rc_mlx5_iface_common_t *iface,
 {
     uct_ib_md_t *md = uct_ib_iface_md(&iface->super.super);
     ucs_status_t status;
+    size_t sg_byte_count[16];
 
     ucs_assert(iface->config.srq_topo != UCT_RC_MLX5_SRQ_TOPO_CYCLIC);
 
@@ -891,8 +880,9 @@ ucs_status_t uct_rc_mlx5_init_rx_tm(uct_rc_mlx5_iface_common_t *iface,
 
     iface->super.rx.srq.quota = srq_attr->attr.max_wr;
 
+    uct_ib_mlx5_srq_init_sg_byte_counts(iface, sg_byte_count);
     status = uct_ib_mlx5_verbs_srq_init(&iface->rx.srq, iface->rx.srq.verbs.srq,
-                                        iface->super.super.config.seg_size,
+                                        sg_byte_count,
                                         iface->tm.mp.num_strides);
     if (status != UCS_OK) {
         goto err_free_srq;

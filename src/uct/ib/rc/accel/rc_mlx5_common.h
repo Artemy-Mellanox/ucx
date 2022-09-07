@@ -319,8 +319,8 @@ typedef struct uct_rc_mlx5_tmh_priv_data {
 void uct_rc_mlx5_release_desc(uct_recv_desc_t *self, void *desc);
 
 typedef struct uct_rc_mlx5_release_desc {
-    uct_recv_desc_t             super;
-    unsigned                    offset;
+    uct_recv_desc_t super;
+    int             offset;
 } uct_rc_mlx5_release_desc_t;
 
 
@@ -458,7 +458,8 @@ UCS_CLASS_DECLARE(uct_rc_mlx5_iface_common_t, uct_iface_ops_t*,
 
 #define UCT_RC_MLX5_TM_ENABLED(_iface) (_iface)->tm.enabled
 
-#define UCT_RC_MLX5_MP_ENABLED(_iface) ((_iface)->tm.mp.num_strides > 1)
+#define UCT_RC_MLX5_MP_ENABLED(_iface) \
+    ((_iface)->tm.mp.num_strides > UCT_IB_RECV_SG_LIST_LEN)
 
 /* TMH can carry 2 bytes of data in its reserved filed */
 #define UCT_RC_MLX5_TMH_PRIV_LEN       ucs_field_sizeof(uct_rc_mlx5_tmh_priv_data_t, \
@@ -577,8 +578,15 @@ uct_rc_mlx5_handle_rndv_fin(uct_rc_mlx5_iface_common_t *iface, uint32_t app_ctx)
 
 extern ucs_config_field_t uct_rc_mlx5_common_config_table[];
 
-unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface);
-unsigned uct_rc_mlx5_iface_srq_post_recv_ll(uct_rc_mlx5_iface_common_t *iface);
+typedef ucs_status_t
+uct_rc_mlx5_iface_set_seg_func(uct_rc_mlx5_iface_common_t *iface,
+                               uct_ib_mlx5_srq_seg_t *seg);
+unsigned
+uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface,
+                                uct_rc_mlx5_iface_set_seg_func set_seg);
+unsigned
+uct_rc_mlx5_iface_srq_post_recv_ll(uct_rc_mlx5_iface_common_t *iface,
+                                   uct_rc_mlx5_iface_set_seg_func set_seg);
 
 void uct_rc_mlx5_iface_common_prepost_recvs(uct_rc_mlx5_iface_common_t *iface);
 

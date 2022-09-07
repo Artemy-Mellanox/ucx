@@ -184,7 +184,7 @@ static ucs_config_field_t ucp_context_config_table[] = {
    "multiple rails. Must be greater than 0.",
    ucs_offsetof(ucp_context_config_t, min_rndv_chunk_size), UCS_CONFIG_TYPE_MEMUNITS},
 
-  {"RNDV_SCHEME", "auto",
+  {"RNDV_SCHEME", "get_zcopy",
    "Communication scheme in RNDV protocol.\n"
    " get_zcopy - use get_zcopy scheme in RNDV protocol.\n"
    " put_zcopy - use put_zcopy scheme in RNDV protocol.\n"

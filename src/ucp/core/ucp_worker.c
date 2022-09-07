@@ -874,6 +874,39 @@ static uint64_t ucp_worker_get_exclude_caps(ucp_worker_h worker)
     return exclude_caps;
 }
 
+UCS_PROFILE_FUNC(size_t, ucp_worker_user_allocator_get_cb,
+                 (arg, num_of_buffers, memh, buffers), void *arg,
+                 size_t num_of_buffers, uct_mem_h *memh, void **buffers)
+{
+    const ucp_worker_iface_t *wiface = arg;
+    const ucp_worker_h worker        = wiface->worker;
+    const ucp_context_h context      = worker->context;
+    const ucp_tl_resource_desc_t *resource =
+            &context->tl_rscs[wiface->rsc_index];
+    ucp_mem_h ucp_memh;
+    size_t num_allocated;
+
+    assert(buffers != NULL);
+    assert(memh != NULL);
+
+    num_allocated = worker->user_mem_allocator.cb(
+            worker->user_mem_allocator.arg, num_of_buffers, buffers, &ucp_memh);
+
+    if (ucs_unlikely(num_allocated == 0)) {
+        return num_allocated;
+    }
+
+    ucs_assertv(resource->md_index < UCP_MD_INDEX_BITS, "md_index=%d",
+                resource->md_index);
+    ucs_assertv((ucp_memh->md_map & UCS_BIT(resource->md_index)) != 0,
+                "md_map=%" PRIx64 " md_index=%d", ucp_memh->md_map,
+                resource->md_index);
+
+    *memh = ucp_memh->uct[resource->md_index];
+
+    return num_allocated;
+}
+
 /* Check if the transport support at least one keepalive mechanism */
 static int ucp_worker_iface_support_keepalive(ucp_worker_iface_t *wiface)
 {
@@ -1083,9 +1116,12 @@ static ucs_status_t ucp_worker_add_resource_ifaces(ucp_worker_h worker)
     worker->num_ifaces = num_ifaces;
     iface_id           = 0;
 
+    iface_params.rx_allocator.cb  = NULL;
+    iface_params.rx_header_length = sizeof(ucp_am_hdr_t);
+
     UCS_BITMAP_FOR_EACH_BIT(tl_bitmap, tl_id) {
         iface_params.field_mask = UCT_IFACE_PARAM_FIELD_OPEN_MODE;
-        resource = &context->tl_rscs[tl_id];
+        resource                = &context->tl_rscs[tl_id];
 
         if (resource->flags & UCP_TL_RSC_FLAG_SOCKADDR) {
             iface_params.open_mode            = UCT_IFACE_OPEN_MODE_SOCKADDR_CLIENT;
@@ -1094,6 +1130,15 @@ static ucs_status_t ucp_worker_add_resource_ifaces(ucp_worker_h worker)
             iface_params.field_mask          |= UCT_IFACE_PARAM_FIELD_DEVICE;
             iface_params.mode.device.tl_name  = resource->tl_rsc.tl_name;
             iface_params.mode.device.dev_name = resource->tl_rsc.dev_name;
+        }
+
+        iface_params.field_mask |= UCT_IFACE_PARAM_FIELD_RX_HEADER_LENGTH;
+        if (worker->user_mem_allocator.cb != NULL) {
+            iface_params.field_mask |= UCT_IFACE_PARAM_FIELD_USER_ALLOCATOR |
+                                       UCT_IFACE_PARAM_FIELD_RX_PAYLOAD_LENGTH;
+            iface_params.rx_allocator.cb   = ucp_worker_user_allocator_get_cb;
+            iface_params.rx_payload_length =
+                    worker->user_mem_allocator.buffer_size;
         }
 
         status = ucp_worker_iface_open(worker, tl_id, &iface_params,
@@ -1222,14 +1267,14 @@ ucs_status_t ucp_worker_iface_open(ucp_worker_h worker, ucp_rsc_index_t tl_id,
         return UCS_ERR_NO_MEMORY;
     }
 
-    wiface->rsc_index        = tl_id;
-    wiface->worker           = worker;
-    wiface->event_fd         = -1;
-    wiface->activate_count   = 0;
-    wiface->check_events_id  = UCS_CALLBACKQ_ID_NULL;
-    wiface->proxy_recv_count = 0;
-    wiface->post_count       = 0;
-    wiface->flags            = 0;
+    wiface->rsc_index              = tl_id;
+    wiface->worker                 = worker;
+    wiface->event_fd               = -1;
+    wiface->activate_count         = 0;
+    wiface->check_events_id        = UCS_CALLBACKQ_ID_NULL;
+    wiface->proxy_recv_count       = 0;
+    wiface->post_count             = 0;
+    wiface->flags                  = 0;
 
     /* Read interface or md configuration */
     if (resource->flags & UCP_TL_RSC_FLAG_SOCKADDR) {
@@ -1276,6 +1321,7 @@ ucs_status_t ucp_worker_iface_open(ucp_worker_h worker, ucp_rsc_index_t tl_id,
                                       UCT_IFACE_PARAM_FIELD_HW_TM_EAGER_CB;
     }
 
+    iface_params->rx_allocator.arg  = wiface;
     iface_params->async_event_arg   = wiface;
     iface_params->async_event_cb    = ucp_worker_iface_async_cb_event;
     iface_params->field_mask       |= UCT_IFACE_PARAM_FIELD_ASYNC_EVENT_ARG |
@@ -2331,6 +2377,23 @@ ucs_status_t ucp_worker_create(ucp_context_h context,
     status = UCS_PTR_MAP_INIT(request, &worker->request_map);
     if (status != UCS_OK) {
         goto err_destroy_ep_map;
+    }
+
+    if (params->field_mask & UCP_WORKER_PARAM_FIELD_USER_ALLOCATOR) {
+        if ((params->user_allocator.cb == NULL) ||
+            (params->user_allocator.buffer_size == 0)) {
+            ucs_error("invalid user allocator: allocator_cb "
+                      "%p, buffer_size %lu\n",
+                      (void*)params->user_allocator.cb,
+                      params->user_allocator.buffer_size);
+            status = UCS_ERR_INVALID_PARAM;
+            goto err_free;
+        }
+
+        worker->user_mem_allocator.buffer_size =
+                params->user_allocator.buffer_size;
+        worker->user_mem_allocator.cb  = params->user_allocator.cb;
+        worker->user_mem_allocator.arg = params->user_allocator.arg;
     }
 
     /* Create statistics */
