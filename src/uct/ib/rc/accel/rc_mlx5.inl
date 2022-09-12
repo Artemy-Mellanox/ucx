@@ -1867,7 +1867,7 @@ static void UCS_F_ALWAYS_INLINE uct_ib_mlx5_srq_init_sg_byte_counts(
 /**
  * Check if rx_allocator cache is empty
  */
-UCS_F_ALWAYS_INLINE int
+static UCS_F_ALWAYS_INLINE int
 uct_rc_mlx5_rx_allocator_is_empty(uct_base_iface_t *base_iface)
 {
     return (base_iface->rx_allocator.cache.ready_idx ==
@@ -1878,7 +1878,7 @@ uct_rc_mlx5_rx_allocator_is_empty(uct_base_iface_t *base_iface)
  * Call rx allocator cb to fill the rx_allocator cache
  * with new available buffers.
  */
-UCS_F_ALWAYS_INLINE ucs_status_t
+static UCS_F_ALWAYS_INLINE ucs_status_t
 uct_rc_mlx5_rx_allocator_get_buffers(uct_base_iface_t *base_iface)
 {
     size_t num_allocated;
@@ -1902,7 +1902,7 @@ uct_rc_mlx5_rx_allocator_get_buffers(uct_base_iface_t *base_iface)
 /**
  * Return buffer from the rx_allocator cache
  */
-UCS_F_ALWAYS_INLINE void *
+static UCS_F_ALWAYS_INLINE void *
 uct_rc_mlx5_rx_allocator_get_buffer(uct_base_iface_t *base_iface)
 {
     void *buff;

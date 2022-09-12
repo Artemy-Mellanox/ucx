@@ -1126,6 +1126,7 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
         status = memory_allocator_init(ucp_context, ALLOCATOR_PAYLOAD_LENGTH,
                                       &allocator_obj);
         if (status != UCS_OK) {
+            ret = -1;
             fprintf(stderr, "failed to create memory allocator (%s)\n",
                     ucs_status_string(status));
             goto err;
