@@ -103,6 +103,7 @@ uct_rc_mlx5_iface_update_srq_res(uct_rc_iface_t *iface, uct_ib_mlx5_srq_t *srq,
     *srq->db                    = htonl(srq->sw_pi);
 }
 
+inline
 unsigned uct_rc_mlx5_iface_srq_post_recv(uct_rc_mlx5_iface_common_t *iface,
                                          uct_rc_mlx5_iface_set_seg_func set_seg,
                                          unsigned poll_flags)

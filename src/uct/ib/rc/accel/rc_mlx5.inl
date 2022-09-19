@@ -2040,7 +2040,7 @@ uct_rc_mlx5_iface_common_seg_set_sge_payload_entry(
     return UCS_OK;
 }
 
-static UCS_F_ALWAYS_INLINE ucs_status_t
+static inline ucs_status_t
 uct_rc_mlx5_iface_common_srq_set_seg_sge(uct_rc_mlx5_iface_common_t *iface,
                                          uct_ib_mlx5_srq_seg_t *seg,
                                          unsigned poll_flags)

@@ -15,6 +15,8 @@
 #include <uct/ib/mlx5/dv/ib_mlx5_ifc.h>
 #include <uct/ib/mlx5/ib_mlx5.inl>
 
+int nosig = 1;
+
 enum {
     UCT_IB_MLX5_STRIDE_BLOCK_OP   = 0x400,
     UCT_IB_MLX5_BSF_INL_VALID     = 1 << 15,
@@ -204,7 +206,7 @@ uct_ib_mlx5_set_bsf(void *seg, uint32_t data_size, uint32_t psv_idx)
     basic->bsf_size_sbs = 1 << 7;
     basic->raw_data_size = htonl(data_size);
 
-    basic->mem.bs_selector = bs_selector(512);
+    basic->mem.bs_selector = bs_selector(UCT_IB_MLX5_T10DIF_BLOCK);
     basic->m_bfs_psv = htonl(psv_idx);
 
     inl = &bsf->m_inl;
@@ -361,8 +363,10 @@ ucs_status_t uct_ib_mlx5_sig_mr_init(uct_ib_mlx5_md_t *md,
     }
 
     sig->mr = memh->mrs[UCT_IB_MR_DEFAULT].super.ib;
+    ucs_assert_always(!ucs_check_if_align_pow2((uintptr_t)sig->mr->addr,
+                                               UCT_IB_MLX5_T10DIF_BLOCK));
     length = sig->mr->length;
-    num_elems = length / 512;
+    num_elems = length / UCT_IB_MLX5_T10DIF_BLOCK;
 
     sig->dif = ucs_mmap(NULL, num_elems * 8, PROT_READ|PROT_WRITE,
                         MAP_PRIVATE|MAP_ANONYMOUS, -1, 0, "sig dif");
@@ -383,14 +387,24 @@ ucs_status_t uct_ib_mlx5_sig_mr_init(uct_ib_mlx5_md_t *md,
         goto err;
     }
 
-    wqe = uct_ib_mlx5_sig_umr_start(md, 4, 4, 520 * num_elems);
-    wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
-    wqe = uct_ib_mlx5_set_stride_ctrl(wqe, num_elems, 520, 2);
-    wqe = uct_ib_mlx5_set_stride(wqe, sig->mr->lkey, 512, sig->mr->addr);
-    wqe = uct_ib_mlx5_set_stride(wqe, sig->dif_mr->lkey, 8, sig->dif);
-    wqe = uct_ib_mlx5_sig_umr_round_bb(wqe);
-    wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
-    wqe = uct_ib_mlx5_set_bsf(wqe, 512 * num_elems, md->umr.psv.idx);
+    if (nosig) {
+        wqe = uct_ib_mlx5_sig_umr_start(md, 4, 0, UCT_IB_MLX5_T10DIF_BLOCK * num_elems);
+        wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
+        wqe = uct_ib_mlx5_set_stride_ctrl(wqe, num_elems, UCT_IB_MLX5_T10DIF_BLOCK, 1);
+        wqe = uct_ib_mlx5_set_stride(wqe, sig->mr->lkey, UCT_IB_MLX5_T10DIF_BLOCK, sig->mr->addr);
+        wqe = uct_ib_mlx5_sig_umr_round_bb(wqe);
+        wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
+    } else {
+        wqe = uct_ib_mlx5_sig_umr_start(md, 4, 4, (UCT_IB_MLX5_T10DIF_BLOCK + 8) * num_elems);
+        wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
+        wqe = uct_ib_mlx5_set_stride_ctrl(wqe, num_elems, UCT_IB_MLX5_T10DIF_BLOCK + 8, 2);
+        wqe = uct_ib_mlx5_set_stride(wqe, sig->mr->lkey, UCT_IB_MLX5_T10DIF_BLOCK, sig->mr->addr);
+        wqe = uct_ib_mlx5_set_stride(wqe, sig->dif_mr->lkey, 8, sig->dif);
+        wqe = uct_ib_mlx5_sig_umr_round_bb(wqe);
+        wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
+        wqe = uct_ib_mlx5_set_bsf(wqe, UCT_IB_MLX5_T10DIF_BLOCK * num_elems, md->umr.psv.idx);
+    }
+
     status = uct_ib_mlx5_sig_umr_send(md, wqe, sig->sig_key);
     if (status != UCS_OK) {
         ucs_warn("");
