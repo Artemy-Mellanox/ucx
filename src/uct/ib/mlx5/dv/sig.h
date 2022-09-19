@@ -11,6 +11,10 @@
 
 #if HAVE_DEVX
 
+enum {
+    UCT_IB_MLX5_T10DIF_BLOCK = 512, //*8,
+};
+
 ucs_status_t uct_ib_mlx5_create_psv(struct ibv_pd *pd, struct mlx5dv_devx_obj **psv_p,
                                     uint32_t *index_p);
 void uct_ib_mlx5_destroy_psv(struct mlx5dv_devx_obj *psv);
@@ -22,7 +26,7 @@ static inline uct_ib_mlx5_sig_t *
 uct_ib_mlx5_sig_mr_get_ctx(uct_ib_mlx5_md_t *md, uct_mem_h uct_memh)
 {
     uct_ib_mlx5_mem_t *memh = (uct_ib_mlx5_mem_t*)uct_memh;
-    ucs_status_t status;
+    ucs_status_t UCS_V_UNUSED status;
 
     ucs_assert(memh != UCT_MEM_HANDLE_NULL);
     if (!(memh->super.flags & UCT_IB_MEM_SIG)) {
@@ -91,15 +95,19 @@ uct_ib_mlx5_calc_sig(uct_mem_h memh, void *data, size_t len)
         uint32_t reftag;
     } *t10dif = uct_ib_mlx5_sig_mr_get_dif(NULL, memh, data);
 
-    size_t num_blocks = len / 512;
+    size_t num_blocks = len / UCT_IB_MLX5_T10DIF_BLOCK;
     uint16_t guard;
+    //void *tmp = data;
     int i;
 
-    data  = UCS_PTR_BYTE_OFFSET(data, 512 * num_blocks);
-    guard = uct_ib_mlx5_ipcs(data, len % 512);
+    data  = UCS_PTR_BYTE_OFFSET(data, UCT_IB_MLX5_T10DIF_BLOCK * num_blocks);
+    guard = uct_ib_mlx5_ipcs(data, len % UCT_IB_MLX5_T10DIF_BLOCK);
 
+    ucs_memory_cpu_load_fence();
+    //printf("%s:%d %p %p %zd %x\n", __func__, __LINE__, data, t10dif, len, guard);
     for (i = 0; i < num_blocks; i++) {
         guard += t10dif->guard;
+        //printf("%s:%d %x %x %x\n", __func__, __LINE__, t10dif->guard, guard, uct_ib_mlx5_ipcs(UCS_PTR_BYTE_OFFSET(tmp, UCT_IB_MLX5_T10DIF_BLOCK * i), UCT_IB_MLX5_T10DIF_BLOCK));
         t10dif++;
     }
 

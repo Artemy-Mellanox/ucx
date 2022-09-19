@@ -1885,6 +1885,7 @@ struct ucp_am_recv_param {
      * Relevant only for eager protocols.
      */
     void               *payload;
+    uint16_t           sig;
 };
 
 
