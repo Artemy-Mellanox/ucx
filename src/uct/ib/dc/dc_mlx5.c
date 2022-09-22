@@ -1066,10 +1066,14 @@ void uct_dc_mlx5_fc_entry_iter_del(uct_dc_mlx5_iface_t *iface, khiter_t it)
 static ucs_status_t
 uct_dc_mlx5_iface_fc_handler(uct_rc_iface_t *rc_iface, unsigned qp_num,
                              uct_rc_hdr_t *hdr, unsigned length,
-                             uint32_t imm_data, uint16_t lid, unsigned flags)
+                             uint32_t imm_data, uint16_t lid, unsigned flags,
+                             uct_am_callback_params_t *params)
 {
     uct_dc_mlx5_iface_t *iface = ucs_derived_of(rc_iface, uct_dc_mlx5_iface_t);
-    uint8_t fc_hdr             = uct_rc_fc_get_fc_hdr(hdr->am_id);
+    size_t client_hdr_len = rc_iface->super.super.rx_allocator.header_length;
+    size_t tl_desc_hdr_part_length = sizeof(*hdr) + client_hdr_len;
+    size_t concatenated_hdr_length = length + sizeof(*hdr);
+    uint8_t fc_hdr;
     uct_dc_fc_sender_data_t *sender;
     uct_dc_fc_request_t *dc_req;
     int16_t cur_wnd;
@@ -1080,9 +1084,19 @@ uct_dc_mlx5_iface_fc_handler(uct_rc_iface_t *rc_iface, unsigned qp_num,
     ucs_arbiter_group_t *group;
     uint8_t pool_index;
     char buf[128];
+    uct_rc_hdr_t *concatenated_hdr;
 
     ucs_assert(rc_iface->config.fc_enabled);
 
+    concatenated_hdr = ucs_alloca(concatenated_hdr_length);
+    memcpy(concatenated_hdr, hdr, tl_desc_hdr_part_length);
+    if (concatenated_hdr_length > tl_desc_hdr_part_length) {
+        memcpy(UCS_PTR_BYTE_OFFSET(concatenated_hdr, tl_desc_hdr_part_length),
+               params->payload,
+               concatenated_hdr_length - tl_desc_hdr_part_length);
+    }
+
+    fc_hdr = uct_rc_fc_get_fc_hdr(concatenated_hdr->am_id);
     if (fc_hdr == UCT_RC_EP_FLAG_FC_HARD_REQ) {
         ep = iface->tx.fc_ep;
         UCS_STATS_UPDATE_COUNTER(ep->fc.stats, UCT_RC_FC_STAT_RX_HARD_REQ, 1);
@@ -1097,10 +1111,10 @@ uct_dc_mlx5_iface_fc_handler(uct_rc_iface_t *rc_iface, unsigned qp_num,
         dc_req->super.ep         = &ep->super.super;
         dc_req->dct_num          = imm_data;
         dc_req->lid              = lid;
-        dc_req->sender           = *((uct_dc_fc_sender_data_t*)(hdr + 1));
+        dc_req->sender = *((uct_dc_fc_sender_data_t*)(concatenated_hdr + 1));
 
         status = uct_dc_mlx5_iface_fc_grant(&dc_req->super.super);
-        if (status == UCS_ERR_NO_RESOURCE){
+        if (status == UCS_ERR_NO_RESOURCE) {
             uct_dc_mlx5_ep_do_pending_fc(ep, dc_req);
         } else if (status != UCS_OK) {
             ucs_diag("fc_ep %p: failed to send %s: %s", ep,
@@ -1108,7 +1122,7 @@ uct_dc_mlx5_iface_fc_handler(uct_rc_iface_t *rc_iface, unsigned qp_num,
                      ucs_status_string(status));
         }
     } else if (fc_hdr == UCT_RC_EP_FC_PURE_GRANT) {
-        sender = (uct_dc_fc_sender_data_t *)(hdr + 1);
+        sender = (uct_dc_fc_sender_data_t*)(concatenated_hdr + 1);
 
         it = kh_get(uct_dc_mlx5_fc_hash, &iface->tx.fc_hash, sender->ep);
         if ((it == kh_end(&iface->tx.fc_hash)) ||

@@ -256,6 +256,12 @@ typedef struct uct_iface_internal_ops {
     uct_ep_invalidate_func_t       ep_invalidate;
 } uct_iface_internal_ops_t;
 
+typedef struct uct_iface_recv_desc {
+    uct_mem_h uct_memh;
+} UCS_S_PACKED uct_iface_recv_desc_t;
+
+void uct_iface_recv_desc_init(uct_iface_h tl_iface, void *obj, uct_mem_h memh);
+
 
 /**
  * Base structure of all interfaces.
@@ -282,6 +288,40 @@ typedef struct uct_base_iface {
         ucs_log_level_t      failure_level;
         size_t               max_num_eps;
     } config;
+
+    struct {
+        size_t               header_length;  /* Message user header length */
+        size_t               payload_length; /* Message payload length */
+        uct_rx_allocator_t   allocator;      /* Memory allocator fields */
+        int                  user_allocator; /* Indicate if it's a user memory allocator */
+
+        struct {
+            /**
+             * Memory handle of the cached rx buffers
+             */
+            uct_mem_h        memh;
+
+            /**
+             * Index of the next available rx buffer
+             */
+            size_t           ready_idx;
+
+            /**
+             * Num of cached rx buffer
+             */
+            size_t           available;
+
+            /** 
+             * Hold recent available rx buffers
+             * allocated by the memory allocator
+             */
+            void             *buffers[UCT_ALLOCATOR_MAX_RX_BUFFS];
+        } cache;
+    } rx_allocator;
+
+    ucs_mpool_t payload_mp;                  /* Payload buffers mpool.
+                                              * Used only with default RX allocator
+                                              */
 
     UCS_STATS_NODE_DECLARE(stats)            /* Statistics */
 } uct_base_iface_t;
@@ -882,9 +922,8 @@ static inline ucs_status_t uct_iface_invoke_am(uct_base_iface_t *iface,
 
     handler = &iface->am[id];
     status  = handler->cb(handler->arg, msg_hdr, length, flags, params);
-    ucs_assertv((status == UCS_OK) ||
-                ((status == UCS_INPROGRESS) && (flags &
-                                                UCT_CB_PARAM_FLAG_DESC)),
+    ucs_assertv((status == UCS_OK) || ((status == UCS_INPROGRESS) &&
+                                       (flags & UCT_CB_PARAM_FLAG_DESC)),
                 "%s(arg=%p msg_hdr=%p length=%u flags=0x%x) returned %s",
                 ucs_debug_get_symbol_name((void*)handler->cb), handler->arg,
                 msg_hdr, length, flags, ucs_status_string(status));

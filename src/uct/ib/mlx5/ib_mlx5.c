@@ -775,6 +775,8 @@ void uct_ib_mlx5_qp_mmio_cleanup(uct_ib_mlx5_qp_t *qp,
 
 ucs_status_t uct_ib_mlx5_get_rxwq(struct ibv_qp *verbs_qp, uct_ib_mlx5_rxwq_t *rxwq)
 {
+    const size_t rq_sge_stride = sizeof(struct mlx5_wqe_data_seg) *
+                                 UCT_IB_RECV_SG_LIST_LEN;
     uct_ib_mlx5dv_qp_t qp_info = {};
     uct_ib_mlx5dv_t obj = {};
     ucs_status_t status;
@@ -788,7 +790,7 @@ ucs_status_t uct_ib_mlx5_get_rxwq(struct ibv_qp *verbs_qp, uct_ib_mlx5_rxwq_t *r
     }
 
     if (!ucs_is_pow2(qp_info.dv.rq.wqe_cnt) ||
-        qp_info.dv.rq.stride != sizeof(struct mlx5_wqe_data_seg)) {
+        (qp_info.dv.rq.stride != rq_sge_stride)) {
         ucs_error("mlx5 rx wq [count=%d stride=%d] has invalid parameters",
                   qp_info.dv.rq.wqe_cnt,
                   qp_info.dv.rq.stride);
@@ -800,14 +802,14 @@ ucs_status_t uct_ib_mlx5_get_rxwq(struct ibv_qp *verbs_qp, uct_ib_mlx5_rxwq_t *r
     rxwq->mask            = qp_info.dv.rq.wqe_cnt - 1;
     /* cppcheck-suppress autoVariables */
     rxwq->dbrec           = &qp_info.dv.dbrec[MLX5_RCV_DBR];
-    memset(rxwq->wqes, 0, qp_info.dv.rq.wqe_cnt * sizeof(struct mlx5_wqe_data_seg));
+    memset(rxwq->wqes, 0, qp_info.dv.rq.wqe_cnt * rq_sge_stride);
 
     return UCS_OK;
 }
 
 ucs_status_t
 uct_ib_mlx5_verbs_srq_init(uct_ib_mlx5_srq_t *srq, struct ibv_srq *verbs_srq,
-                           size_t sg_byte_count, int sge_num)
+                           const size_t *sg_byte_count, int sge_num)
 {
     uct_ib_mlx5dv_srq_t srq_info = {};
     uct_ib_mlx5dv_t obj          = {};
@@ -857,7 +859,8 @@ uct_ib_mlx5_verbs_srq_init(uct_ib_mlx5_srq_t *srq, struct ibv_srq *verbs_srq,
 }
 
 void uct_ib_mlx5_srq_buff_init(uct_ib_mlx5_srq_t *srq, uint32_t head,
-                               uint32_t tail, size_t sg_byte_count, int sge_num)
+                               uint32_t tail, const size_t *sg_byte_count,
+                               int sge_num)
 {
     uct_ib_mlx5_srq_seg_t *seg;
     unsigned i, j;
@@ -876,7 +879,7 @@ void uct_ib_mlx5_srq_buff_init(uct_ib_mlx5_srq_t *srq, uint32_t head,
         seg->srq.desc           = NULL;
         seg->srq.strides        = sge_num;
         for (j = 0; j < sge_num; ++j) {
-            seg->dptr[j].byte_count = htonl(sg_byte_count);
+            seg->dptr[j].byte_count = htonl(sg_byte_count[j]);
         }
     }
 }

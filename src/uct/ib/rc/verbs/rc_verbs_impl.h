@@ -56,11 +56,12 @@ uct_rc_verbs_iface_handle_am(uct_rc_iface_t *iface, uct_rc_hdr_t *hdr,
     ucs_status_t status;
     void *udesc;
 
-    desc = (uct_ib_iface_recv_desc_t *)wr_id;
+    desc = (uct_ib_iface_recv_desc_t*)wr_id;
     if (ucs_unlikely(hdr->am_id & UCT_RC_EP_FC_MASK)) {
         rc_ops = ucs_derived_of(iface->super.ops, uct_rc_iface_ops_t);
         status = rc_ops->fc_handler(iface, qp_num, hdr, length - sizeof(*hdr),
-                                    imm_data, slid, UCT_CB_PARAM_FLAG_DESC);
+                                    imm_data, slid, UCT_CB_PARAM_FLAG_DESC,
+                                    NULL);
     } else {
         status = uct_iface_invoke_am(&iface->super.super, hdr->am_id, hdr + 1,
                                      length - sizeof(*hdr),

@@ -294,6 +294,8 @@ typedef struct ucp_worker {
                                                              one for each resource */
     unsigned                         num_ifaces;          /* Number of elements in ifaces array  */
     unsigned                         num_active_ifaces;   /* Number of activated ifaces  */
+
+    ucp_user_mem_allocator_t         user_mem_allocator;  /* User defined memory allocator */
     ucp_tl_bitmap_t                  scalable_tl_bitmap;  /* Map of scalable tl resources */
     ucp_worker_cm_t                  *cms;                /* Array of CMs, one for each component */
     ucs_mpool_set_t                  am_mps;              /* Memory pool set for AM receives */

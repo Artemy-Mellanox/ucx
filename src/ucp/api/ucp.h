@@ -1239,6 +1239,25 @@ typedef size_t (*ucp_mem_allocator_cb_t)(void *arg, size_t num_of_buffers,
                                          void **buffers, ucp_mem_h *memh);
 
 
+typedef struct {
+    /**
+     * User memory allocator get buf function used by UCX in post receive. 
+     */
+    ucp_mem_allocator_cb_t cb;
+
+    /**
+     * User-defined argument for the allocator callback.
+     */
+    void                   *arg;
+
+    /**
+     * User memory allocator payload's buffer size.
+     * This will be the size of the active message fragment.
+     */
+    size_t                 buffer_size;
+} ucp_user_mem_allocator_t;
+
+
 /**
  * @ingroup UCP_WORKER
  * @brief Tuning parameters for the UCP worker.
@@ -1347,23 +1366,7 @@ typedef struct ucp_worker_params {
     /**
      * User defined memory allocator
      */
-    struct {
-        /**
-         * User memory allocator get buf function used by UCX in post receive. 
-         */
-        ucp_mem_allocator_cb_t cb;
-
-        /**
-         * User-defined argument for the allocator callback.
-         */
-        void                   *arg;
-
-        /**
-         * User memory allocator payload's buffer size.
-         * This will be the size of the active message fragment.
-         */
-        size_t                 buffer_size;
-    } user_allocator;
+    ucp_user_mem_allocator_t user_allocator;
 } ucp_worker_params_t;
 
 
