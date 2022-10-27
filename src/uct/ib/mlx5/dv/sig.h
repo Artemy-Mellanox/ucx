@@ -12,7 +12,11 @@
 #if HAVE_DEVX
 
 enum {
-    UCT_IB_MLX5_T10DIF_BLOCK = 512, //*8,
+#if T10DIF_4048
+    UCT_IB_MLX5_T10DIF_BLOCK = 4048
+#else
+    UCT_IB_MLX5_T10DIF_BLOCK = 512
+#endif
 };
 
 ucs_status_t uct_ib_mlx5_create_psv(struct ibv_pd *pd, struct mlx5dv_devx_obj **psv_p,
@@ -42,19 +46,26 @@ static inline void *
 uct_ib_mlx5_sig_mr_get_dif(uct_ib_mlx5_md_t *md, uct_mem_h memh, void *ptr)
 {
     uct_ib_mlx5_sig_t *sig = uct_ib_mlx5_sig_mr_get_ctx(md, memh);
-    unsigned idx = UCS_PTR_BYTE_DIFF(sig->mr->addr, ptr) / 512;
+    //unsigned idx = UCS_PTR_BYTE_DIFF(sig->mr->addr, ptr) / 512;
+    unsigned idx = UCS_PTR_BYTE_DIFF(sig->mr->addr, ptr) / 4096;
 
     return UCS_PTR_BYTE_OFFSET(sig->dif, idx * 8);
 }
 
 static inline void
-uct_ib_mlx5_sig_mr_get_data(uct_ib_mlx5_md_t *md, uct_mem_h memh, void *payload,
+uct_ib_mlx5_sig_mr_get_data(uct_ib_mlx5_md_t *md, uct_mem_h memh, void *ptr,
                             void **sig_payload_p, uint32_t *sig_key_p)
 {
     uct_ib_mlx5_sig_t *sig = uct_ib_mlx5_sig_mr_get_ctx(md, memh);
 
-    *sig_payload_p = (void *)UCS_PTR_BYTE_DIFF(sig->mr->addr, payload);
+#if T10DIF_4048
+    unsigned idx = UCS_PTR_BYTE_DIFF(sig->mr->addr, ptr) / 4096;
+    *sig_payload_p = (void *)(intptr_t)(idx * 4048);
     *sig_key_p = sig->sig_key;
+#else
+    *sig_payload_p = (void *)UCS_PTR_BYTE_DIFF(sig->mr->addr, ptr);
+    *sig_key_p = sig->sig_key;
+#endif
 }
 
 void uct_ib_mlx5_sig_cleanup(uct_ib_mlx5_sig_t *sig);

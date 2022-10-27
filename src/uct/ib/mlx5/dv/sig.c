@@ -15,7 +15,7 @@
 #include <uct/ib/mlx5/dv/ib_mlx5_ifc.h>
 #include <uct/ib/mlx5/ib_mlx5.inl>
 
-int nosig = 1;
+int nosig = 0;
 
 enum {
     UCT_IB_MLX5_STRIDE_BLOCK_OP   = 0x400,
@@ -190,6 +190,7 @@ static uint8_t bs_selector(int block_size)
         case 4096:          return 0x3;
         case 4160:          return 0x4;
         case 1073741824:    return 0x5;
+        case 4048:          return 0x6;
         default:            return 0;
     }
 }
@@ -253,6 +254,19 @@ uct_ib_mlx5_set_stride(void* seg, uint32_t lkey, size_t size, void* buff)
     sentry->memkey = htonl(lkey);
     sentry->va = htobe64((uintptr_t)buff);
     sentry->stride = htons(size);
+
+    return UCS_PTR_TYPE_OFFSET(seg, (*sentry));
+}
+
+void*
+uct_ib_mlx5_set_stride2(void* seg, uint32_t lkey, size_t size, size_t stride, void* buff)
+{
+    struct uct_ib_mlx5_seg_repeat_ent *sentry = seg;
+
+    sentry->byte_count = htons(size);
+    sentry->memkey = htonl(lkey);
+    sentry->va = htobe64((uintptr_t)buff);
+    sentry->stride = htons(stride);
 
     return UCS_PTR_TYPE_OFFSET(seg, (*sentry));
 }
@@ -384,6 +398,7 @@ ucs_status_t uct_ib_mlx5_sig_mr_init(uct_ib_mlx5_md_t *md,
 
     status = uct_ib_mlx5_reg_mr(md, 4, &sig->sig_mr, &sig->sig_key);
     if (status != UCS_OK) {
+        ucs_warn("");
         goto err;
     }
 
@@ -398,7 +413,9 @@ ucs_status_t uct_ib_mlx5_sig_mr_init(uct_ib_mlx5_md_t *md,
         wqe = uct_ib_mlx5_sig_umr_start(md, 4, 4, (UCT_IB_MLX5_T10DIF_BLOCK + 8) * num_elems);
         wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
         wqe = uct_ib_mlx5_set_stride_ctrl(wqe, num_elems, UCT_IB_MLX5_T10DIF_BLOCK + 8, 2);
-        wqe = uct_ib_mlx5_set_stride(wqe, sig->mr->lkey, UCT_IB_MLX5_T10DIF_BLOCK, sig->mr->addr);
+        wqe = uct_ib_mlx5_set_stride2(wqe, sig->mr->lkey, UCT_IB_MLX5_T10DIF_BLOCK,
+                                      ucs_roundup_pow2(UCT_IB_MLX5_T10DIF_BLOCK),
+                                      sig->mr->addr);
         wqe = uct_ib_mlx5_set_stride(wqe, sig->dif_mr->lkey, 8, sig->dif);
         wqe = uct_ib_mlx5_sig_umr_round_bb(wqe);
         wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
