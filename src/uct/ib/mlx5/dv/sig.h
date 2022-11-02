@@ -46,8 +46,11 @@ static inline void *
 uct_ib_mlx5_sig_mr_get_dif(uct_ib_mlx5_md_t *md, uct_mem_h memh, void *ptr)
 {
     uct_ib_mlx5_sig_t *sig = uct_ib_mlx5_sig_mr_get_ctx(md, memh);
-    //unsigned idx = UCS_PTR_BYTE_DIFF(sig->mr->addr, ptr) / 512;
+#if T10DIF_4048
     unsigned idx = UCS_PTR_BYTE_DIFF(sig->mr->addr, ptr) / 4096;
+#else
+    unsigned idx = UCS_PTR_BYTE_DIFF(sig->mr->addr, ptr) / 512;
+#endif
 
     return UCS_PTR_BYTE_OFFSET(sig->dif, idx * 8);
 }
