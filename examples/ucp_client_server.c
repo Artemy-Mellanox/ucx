@@ -39,6 +39,7 @@
 #include <arpa/inet.h> /* inet_addr */
 #include <unistd.h>    /* getopt */
 #include <stdlib.h>    /* atoi */
+#include <sys/mman.h>
 
 #define DEFAULT_PORT             13337
 #define IP_STRING_LEN            50
@@ -58,6 +59,7 @@ static uint16_t server_port    = DEFAULT_PORT;
 static sa_family_t ai_family   = AF_INET;
 static int num_iterations      = DEFAULT_NUM_ITERATIONS;
 static int user_allocator      = 0;
+static int sig                 = 0;
 int next_held_data_desc_idx    = 0;
 static void *held_data_descs[ALLOCATOR_NUM_OF_BUFFERS];
 
@@ -660,6 +662,7 @@ static void usage()
                     "transfer function call. (default = %ld).\n",
                     iov_cnt);
     fprintf(stderr, "  -u Use this option to run the example with rx buffers allocator implementing the user allocator API.\n");
+    fprintf(stderr, "  -S Use this option to run the example with signature handover.\n");
     print_common_help();
     fprintf(stderr, "\n");
 }
@@ -673,7 +676,7 @@ static int parse_cmd(int argc, char *const argv[], char **server_addr,
     int c = 0;
     int port;
 
-    while ((c = getopt(argc, argv, "a:l:p:c:6i:s:v:m:uh")) != -1) {
+    while ((c = getopt(argc, argv, "a:l:p:c:6i:s:v:m:uhS")) != -1) {
         switch (c) {
         case 'a':
             *server_addr = optarg;
@@ -730,6 +733,9 @@ static int parse_cmd(int argc, char *const argv[], char **server_addr,
             break;
         case 'u':
             user_allocator = 1;
+            break;
+        case 'S':
+            sig = 1;
             break;
         case 'h':
         default:
@@ -830,7 +836,8 @@ memory_allocator_chunk_alloc(ucs_mpool_t *mp, size_t *size_p, void **chunk_p)
     ucs_status_t status;
     ucp_mem_map_params_t params;
 
-    *chunk_p = malloc(chunk_size);
+    *chunk_p = mmap(NULL, chunk_size, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (*chunk_p == NULL) {
         return UCS_ERR_NO_MEMORY;
     }
@@ -856,11 +863,16 @@ static void memory_allocator_chunk_release(ucs_mpool_t *mp, void *chunk)
     const ucp_worker_memory_allocator_obj_t *allocator =
             (ucp_worker_memory_allocator_obj_t*)mp;
     ucp_mem_attr_t memh_attr;
+    int ret;
 
-    memh_attr.field_mask = UCP_MEM_ATTR_FIELD_ADDRESS;
+    memh_attr.field_mask = UCP_MEM_ATTR_FIELD_ADDRESS |
+                           UCP_MEM_ATTR_FIELD_LENGTH;
     ucp_mem_query(allocator->memh, &memh_attr);
     ucp_mem_unmap(allocator->context, allocator->memh);
-    free(memh_attr.address);
+    ret = munmap(memh_attr.address, memh_attr.length);
+    if (ret != 0) {
+        fprintf(stderr, "munmap() failed: %m\n");
+    }
 }
 
 static ucs_mpool_ops_t memory_allocator_ops = {
@@ -900,6 +912,9 @@ memory_allocator_init(ucp_context_h context, const size_t buffer_size,
     mp_params.max_chunk_size  = -1;
     mp_params.ops             = &memory_allocator_ops;
     mp_params.name            = "mpool_allocator";
+    if (sig) {
+        mp_params.alignment   = 4096;
+    }
     status                    = ucs_mpool_init(&mp_params, &allocator->mpool);
     if (status != UCS_OK) {
         return status;
@@ -966,6 +981,11 @@ static int init_worker(ucp_context_h ucp_context, ucp_worker_h *ucp_worker,
         worker_params.user_allocator.cb          = memory_allocator_get_buff;
         worker_params.user_allocator.buffer_size = allocator_obj->payload_length;
         worker_params.user_allocator.arg         = allocator_obj;
+
+        if (sig) {
+            worker_params.field_mask |= UCP_WORKER_PARAM_FIELD_FLAGS;
+            worker_params.flags      |= UCP_WORKER_FLAG_SIGNATURE;
+        }
     }
 
     status = ucp_worker_create(ucp_context, &worker_params, ucp_worker);
@@ -1126,6 +1146,7 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
         status = memory_allocator_init(ucp_context, ALLOCATOR_PAYLOAD_LENGTH,
                                       &allocator_obj);
         if (status != UCS_OK) {
+            ret = -1;
             fprintf(stderr, "failed to create memory allocator (%s)\n",
                     ucs_status_string(status));
             goto err;

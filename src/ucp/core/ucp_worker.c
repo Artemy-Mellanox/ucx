@@ -1343,6 +1343,10 @@ ucs_status_t ucp_worker_iface_open(ucp_worker_h worker, ucp_rsc_index_t tl_id,
     iface_params->field_mask |= UCT_IFACE_PARAM_FIELD_FEATURES;
     iface_params->features    = ucp_worker_get_uct_features(worker->context);
 
+    if (worker->flags & UCP_WORKER_FLAG_SIGNATURE) {
+        iface_params->features |= UCT_IFACE_FEATURE_SIGNATURE;
+    }
+
     /* Open UCT interface */
     status = uct_iface_open(md, worker->uct, iface_params, iface_config,
                             &wiface->iface);
@@ -2392,8 +2396,8 @@ ucs_status_t ucp_worker_create(ucp_context_h context,
 
         worker->user_mem_allocator.buffer_size =
                 params->user_allocator.buffer_size;
-        worker->user_mem_allocator.cb  = params->user_allocator.cb;
-        worker->user_mem_allocator.arg = params->user_allocator.arg;
+        worker->user_mem_allocator.cb    = params->user_allocator.cb;
+        worker->user_mem_allocator.arg   = params->user_allocator.arg;
     }
 
     /* Create statistics */

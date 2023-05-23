@@ -4,12 +4,16 @@
 * See file LICENSE for terms.
 */
 
+#ifndef UCT_RC_MLX5_INL_
+#define UCT_RC_MLX5_INL_
+
 #include "rc_mlx5.h"
 #include "rc_mlx5_common.h"
 
 #include <uct/base/uct_iov.inl>
 #include <uct/ib/mlx5/ib_mlx5.inl>
 #include <uct/ib/mlx5/ib_mlx5_log.h>
+#include <uct/ib/mlx5/dv/sig.h>
 
 #define UCT_RC_MLX5_EP_DECL(_tl_ep, _iface, _ep) \
     uct_rc_mlx5_ep_t *_ep = ucs_derived_of(_tl_ep, uct_rc_mlx5_ep_t); \
@@ -399,6 +403,7 @@ uct_rc_mlx5_iface_common_am_handler(uct_rc_mlx5_iface_common_t *iface,
                                     uct_rc_mlx5_hdr_t *hdr, unsigned flags,
                                     unsigned byte_len, int poll_flags)
 {
+    uct_base_iface_t *base_iface = &iface->super.super.super;
     uint16_t wqe_ctr;
     uct_rc_iface_ops_t *rc_ops;
     uct_ib_mlx5_srq_seg_t *seg;
@@ -425,6 +430,14 @@ uct_rc_mlx5_iface_common_am_handler(uct_rc_mlx5_iface_common_t *iface,
                                     cqe->imm_inval_pkey, cqe->slid, flags,
                                     &params);
     } else {
+        if (poll_flags & UCT_RC_MLX5_POLL_FLAG_SIG) {
+            params.field_mask |= UCT_AM_CALLBACK_PARAM_FIELD_SIG;
+            params.signature = uct_ib_mlx5_calc_sig(
+                    base_iface->rx_allocator.cache.memh,
+                    params.payload, byte_len -
+                    uct_ib_iface_tl_hdr_length(&iface->super.super));
+        }
+
         status = uct_iface_invoke_am(&iface->super.super.super,
                                      hdr->rc_hdr.am_id, hdr + 1,
                                      byte_len - sizeof(*hdr), flags, &params);
@@ -1474,7 +1487,8 @@ uct_rc_mlx5_rx_allocator_get_buffer(uct_base_iface_t *base_iface)
 }
 
 static UCS_F_ALWAYS_INLINE ucs_status_t uct_rc_mlx5_iface_common_srq_set_seg(
-        uct_rc_mlx5_iface_common_t *iface, uct_ib_mlx5_srq_seg_t *seg)
+        uct_rc_mlx5_iface_common_t *iface, uct_ib_mlx5_srq_seg_t *seg,
+        unsigned poll_flags)
 {
     uct_ib_iface_recv_desc_t *desc;
     uint64_t desc_map;
@@ -1521,23 +1535,36 @@ uct_rc_mlx5_iface_common_seg_set_sge_header_entry(
 
 static UCS_F_ALWAYS_INLINE ucs_status_t
 uct_rc_mlx5_iface_common_seg_set_sge_payload_entry(
-        uct_rc_mlx5_iface_common_t *iface, uct_ib_mlx5_srq_seg_t *seg)
+        uct_rc_mlx5_iface_common_t *iface, uct_ib_mlx5_srq_seg_t *seg,
+        unsigned poll_flags)
 {
     uct_base_iface_t *base_iface   = &iface->super.super.super;
     uct_ib_iface_recv_desc_t *desc = seg->srq.desc;
+    uct_ib_mlx5_md_t *md           = ucs_derived_of(base_iface->md,
+                                                    uct_ib_mlx5_md_t);
+    uint32_t payload_lkey;
+    ucs_status_t status;
+    void *payload;
 
     desc->payload = uct_rc_mlx5_rx_allocator_get_buffer(base_iface);
     if (ucs_unlikely(desc->payload == NULL)) {
         return UCS_ERR_NO_MEMORY;
     }
 
-    desc->payload_lkey = uct_ib_memh_get_lkey(
-            base_iface->rx_allocator.cache.memh);
+    if (poll_flags & UCT_RC_MLX5_POLL_FLAG_SIG) {
+        status = uct_ib_mlx5_sig_mr_get_data(md, base_iface->rx_allocator.cache.memh,
+                                             desc->payload, &payload, &payload_lkey);
+        if (status != UCS_OK) {
+            return status;
+        }
+    } else {
+        payload = desc->payload;
+        payload_lkey = uct_ib_memh_get_lkey(base_iface->rx_allocator.cache.memh);
+    }
 
     seg->srq.ptr_mask |= UCS_BIT(UCT_IB_RX_SG_PAYLOAD_IDX);
-    seg->dptr[UCT_IB_RX_SG_PAYLOAD_IDX].lkey = htonl(desc->payload_lkey);
-    seg->dptr[UCT_IB_RX_SG_PAYLOAD_IDX].addr = htobe64(
-            (uintptr_t)desc->payload);
+    seg->dptr[UCT_IB_RX_SG_PAYLOAD_IDX].lkey = htonl(payload_lkey);
+    seg->dptr[UCT_IB_RX_SG_PAYLOAD_IDX].addr = htobe64((uintptr_t)payload);
 
     VALGRIND_MAKE_MEM_NOACCESS(desc->payload,
                                base_iface->rx_allocator.payload_length);
@@ -1546,7 +1573,8 @@ uct_rc_mlx5_iface_common_seg_set_sge_payload_entry(
 
 static UCS_F_ALWAYS_INLINE ucs_status_t
 uct_rc_mlx5_iface_common_srq_set_seg_sge(uct_rc_mlx5_iface_common_t *iface,
-                                         uct_ib_mlx5_srq_seg_t *seg)
+                                         uct_ib_mlx5_srq_seg_t *seg,
+                                         unsigned poll_flags)
 {
     uct_base_iface_t *base_iface = &iface->super.super.super;
     uint64_t desc_map;
@@ -1578,22 +1606,11 @@ uct_rc_mlx5_iface_common_srq_set_seg_sge(uct_rc_mlx5_iface_common_t *iface,
          * We know that because before entering this branch we filled
          * the cache with new buffers and checked the return status.
          */
-        uct_rc_mlx5_iface_common_seg_set_sge_payload_entry(iface, seg);
+        uct_rc_mlx5_iface_common_seg_set_sge_payload_entry(iface, seg,
+                                                           poll_flags);
     }
 
     return UCS_OK;
-}
-
-static UCS_F_ALWAYS_INLINE void
-uct_rc_mlx5_iface_srq_post_recv_common(uct_rc_mlx5_iface_common_t *iface)
-{
-    if (ucs_likely(!UCT_RC_MLX5_MP_ENABLED(iface))) {
-        uct_rc_mlx5_iface_srq_post_recv(
-                iface, uct_rc_mlx5_iface_common_srq_set_seg_sge);
-    } else {
-        uct_rc_mlx5_iface_srq_post_recv(iface,
-                                        uct_rc_mlx5_iface_common_srq_set_seg);
-    }
 }
 
 static UCS_F_ALWAYS_INLINE unsigned
@@ -1733,17 +1750,7 @@ out_update_db:
 out:
     max_batch = iface->super.super.config.rx_max_batch;
     if (ucs_unlikely(iface->super.rx.srq.available >= max_batch)) {
-        if (poll_flags & UCT_RC_MLX5_POLL_FLAG_LINKED_LIST) {
-            if (ucs_likely(!UCT_RC_MLX5_MP_ENABLED(iface))) {
-                uct_rc_mlx5_iface_srq_post_recv_ll(
-                        iface, uct_rc_mlx5_iface_common_srq_set_seg_sge);
-            } else {
-                uct_rc_mlx5_iface_srq_post_recv_ll(
-                        iface, uct_rc_mlx5_iface_common_srq_set_seg);
-            }
-        } else {
-            uct_rc_mlx5_iface_srq_post_recv_common(iface);
-        }
+        uct_rc_mlx5_iface_srq_post_recv_common(iface, poll_flags);
     }
     return count;
 }
@@ -2028,3 +2035,4 @@ static void UCS_F_ALWAYS_INLINE uct_ib_mlx5_srq_init_sg_byte_counts(
                 iface->super.super.super.rx_allocator.payload_length;
     }
 }
+#endif

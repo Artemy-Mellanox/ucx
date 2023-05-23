@@ -494,7 +494,8 @@ enum uct_am_callback_params_field {
     /** Enables @ref uct_am_callback_params_t::payload
      *  Indicates that payload field in uct_am_callback_params_t is valid.
      */
-    UCT_AM_CALLBACK_PARAM_FIELD_PAYLOAD = UCS_BIT(0)
+    UCT_AM_CALLBACK_PARAM_FIELD_PAYLOAD = UCS_BIT(0),
+    UCT_AM_CALLBACK_PARAM_FIELD_SIG     = UCS_BIT(1)
 };
 
 
@@ -516,6 +517,12 @@ typedef struct uct_am_callback_params {
      * method, depends on the owner.
      */
     void     *payload;
+
+    /**
+     * Signature for payload. Currently it is calculated as IP checksum and
+     * will be provided if iface was created with UCT_IFACE_FEATURE_SIGNATURE
+     */
+    uint16_t signature;
 } uct_am_callback_params_t;
 
 

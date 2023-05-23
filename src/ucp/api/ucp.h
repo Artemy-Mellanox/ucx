@@ -186,8 +186,10 @@ enum ucp_worker_params_field {
  * which is used as parameter for @ref ucp_worker_create.
  */
 typedef enum {
-    UCP_WORKER_FLAG_IGNORE_REQUEST_LEAK = UCS_BIT(0) /**< Do not print warnings
-                                                          about request leaks */
+    UCP_WORKER_FLAG_IGNORE_REQUEST_LEAK = UCS_BIT(0), /**< Do not print warnings
+                                                           about request leaks */
+    UCP_WORKER_FLAG_SIGNATURE           = UCS_BIT(1)  /**< Enable signature offload.
+                                                           Requires user allocator. */
 } ucp_worker_flags_t;
 
 
@@ -1888,6 +1890,12 @@ struct ucp_am_recv_param {
      * Relevant only for eager protocols.
      */
     void               *payload;
+
+    /**
+     * Signature for payload. Currently it is calculated as IP checksum and
+     * will be provided if worker was created with UCP_WORKER_FLAG_SIGNATURE
+     */
+    uint16_t           signature;
 };
 
 

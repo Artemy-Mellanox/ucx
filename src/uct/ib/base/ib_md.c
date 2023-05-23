@@ -1706,10 +1706,8 @@ void uct_ib_md_close(uct_md_h uct_md)
 {
     uct_ib_md_t *md = ucs_derived_of(uct_md, uct_ib_md_t);
 
-    /* Must be done before md->ops->cleanup, since it can call functions from
-     * md->ops */
-    uct_ib_md_release_reg_method(md);
     md->ops->cleanup(md);
+    uct_ib_md_release_reg_method(md);
     uct_ib_md_release_device_config(md);
     uct_ib_device_cleanup_ah_cached(&md->dev);
     ibv_dealloc_pd(md->pd);
