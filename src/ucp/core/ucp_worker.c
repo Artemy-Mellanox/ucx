@@ -1132,15 +1132,6 @@ static ucs_status_t ucp_worker_add_resource_ifaces(ucp_worker_h worker)
             iface_params.mode.device.dev_name = resource->tl_rsc.dev_name;
         }
 
-        iface_params.field_mask |= UCT_IFACE_PARAM_FIELD_RX_HEADER_LENGTH;
-        if (worker->user_mem_allocator.cb != NULL) {
-            iface_params.field_mask |= UCT_IFACE_PARAM_FIELD_USER_ALLOCATOR |
-                                       UCT_IFACE_PARAM_FIELD_RX_PAYLOAD_LENGTH;
-            iface_params.rx_allocator.cb   = ucp_worker_user_allocator_get_cb;
-            iface_params.rx_payload_length =
-                    worker->user_mem_allocator.buffer_size;
-        }
-
         status = ucp_worker_iface_open(worker, tl_id, &iface_params,
                                        &worker->ifaces[iface_id++]);
         if (status != UCS_OK) {
@@ -1343,8 +1334,24 @@ ucs_status_t ucp_worker_iface_open(ucp_worker_h worker, ucp_rsc_index_t tl_id,
     iface_params->field_mask |= UCT_IFACE_PARAM_FIELD_FEATURES;
     iface_params->features    = ucp_worker_get_uct_features(worker->context);
 
-    if (worker->flags & UCP_WORKER_FLAG_SIGNATURE) {
-        iface_params->features |= UCT_IFACE_FEATURE_SIGNATURE;
+    iface_params->field_mask |= UCT_IFACE_PARAM_FIELD_RX_HEADER_LENGTH;
+
+    if (worker->user_mem_allocator.cb != NULL) {
+        iface_params->field_mask |= UCT_IFACE_PARAM_FIELD_USER_ALLOCATOR |
+                                    UCT_IFACE_PARAM_FIELD_RX_PAYLOAD_LENGTH;
+        iface_params->rx_allocator.cb   = ucp_worker_user_allocator_get_cb;
+        iface_params->rx_payload_length =
+            worker->user_mem_allocator.buffer_size;
+
+        if (worker->flags & UCP_WORKER_FLAG_SIGNATURE) {
+            iface_params->features |= UCT_IFACE_FEATURE_SIGNATURE;
+            iface_params->rx_allocator.sig_attr.block =
+                worker->user_mem_allocator.buffer_size;
+            iface_params->rx_allocator.sig_attr.stride =
+                worker->user_mem_allocator.stride;
+            iface_params->rx_allocator.sig_attr.offset =
+                worker->user_mem_allocator.offset;
+        }
     }
 
     /* Open UCT interface */
@@ -2394,10 +2401,7 @@ ucs_status_t ucp_worker_create(ucp_context_h context,
             goto err_free;
         }
 
-        worker->user_mem_allocator.buffer_size =
-                params->user_allocator.buffer_size;
-        worker->user_mem_allocator.cb    = params->user_allocator.cb;
-        worker->user_mem_allocator.arg   = params->user_allocator.arg;
+        worker->user_mem_allocator = params->user_allocator;
     }
 
     /* Create statistics */

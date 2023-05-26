@@ -1087,6 +1087,28 @@ struct uct_iface_attr {
 
 /*
  * @ingroup UCT_RESOURCE
+ * @RX signature offload attributes
+ *
+ * Attributes defining the way data provided by allocator will be
+ * used in signature offload.
+ */
+
+struct uct_sig_attr {
+    /* Payload block size to be covered by data integrity field
+     * Currently supported value 4048 */
+    size_t block;
+
+    /* Stride in buffer provided by memory allocator. Should be great or
+     * equal to block */
+    size_t stride;
+
+    /* Offset of first block in buffer provided by memory allocatore */
+    size_t offset;
+};
+
+
+/*
+ * @ingroup UCT_RESOURCE
  * @RX buffers allocator obj
  *
  *  This structure holds an memory allocator context and it's used for
@@ -1099,6 +1121,9 @@ struct uct_rx_allocator {
 
     /* User-defined argument for the allocator callback */
     void                            *arg;
+
+    /* Signature offload attributes */
+    uct_sig_attr_t                  sig_attr;
 };
 
 

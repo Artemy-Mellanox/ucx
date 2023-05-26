@@ -39,7 +39,6 @@
 #include <arpa/inet.h> /* inet_addr */
 #include <unistd.h>    /* getopt */
 #include <stdlib.h>    /* atoi */
-#include <sys/mman.h>
 
 #define DEFAULT_PORT             13337
 #define IP_STRING_LEN            50
@@ -51,6 +50,7 @@
 #define TEST_AM_ID               0
 #define ALLOCATOR_NUM_OF_BUFFERS 32768
 #define ALLOCATOR_PAYLOAD_LENGTH 8192
+#define SIGNATURE_BLOCK          4048
 
 
 static long test_string_length = 16;
@@ -60,6 +60,7 @@ static sa_family_t ai_family   = AF_INET;
 static int num_iterations      = DEFAULT_NUM_ITERATIONS;
 static int user_allocator      = 0;
 static int sig                 = 0;
+static int sig_block           = SIGNATURE_BLOCK;
 int next_held_data_desc_idx    = 0;
 static void *held_data_descs[ALLOCATOR_NUM_OF_BUFFERS];
 
@@ -836,8 +837,7 @@ memory_allocator_chunk_alloc(ucs_mpool_t *mp, size_t *size_p, void **chunk_p)
     ucs_status_t status;
     ucp_mem_map_params_t params;
 
-    *chunk_p = mmap(NULL, chunk_size, PROT_READ | PROT_WRITE,
-                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    *chunk_p = malloc(chunk_size);
     if (*chunk_p == NULL) {
         return UCS_ERR_NO_MEMORY;
     }
@@ -863,16 +863,12 @@ static void memory_allocator_chunk_release(ucs_mpool_t *mp, void *chunk)
     const ucp_worker_memory_allocator_obj_t *allocator =
             (ucp_worker_memory_allocator_obj_t*)mp;
     ucp_mem_attr_t memh_attr;
-    int ret;
 
     memh_attr.field_mask = UCP_MEM_ATTR_FIELD_ADDRESS |
                            UCP_MEM_ATTR_FIELD_LENGTH;
     ucp_mem_query(allocator->memh, &memh_attr);
     ucp_mem_unmap(allocator->context, allocator->memh);
-    ret = munmap(memh_attr.address, memh_attr.length);
-    if (ret != 0) {
-        fprintf(stderr, "munmap() failed: %m\n");
-    }
+    free(memh_attr.address);
 }
 
 static ucs_mpool_ops_t memory_allocator_ops = {
@@ -884,14 +880,19 @@ static ucs_mpool_ops_t memory_allocator_ops = {
 };
 
 static ucs_status_t
-memory_allocator_init(ucp_context_h context, const size_t buffer_size,
+memory_allocator_init(ucp_context_h context,
                       ucp_worker_memory_allocator_obj_t **allocator_obj)
 {
     ucp_worker_memory_allocator_obj_t *allocator =
             (ucp_worker_memory_allocator_obj_t*)malloc(
                     sizeof(ucp_worker_memory_allocator_obj_t));
+    size_t buffer_size = ALLOCATOR_PAYLOAD_LENGTH;
     ucs_mpool_params_t mp_params;
     ucs_status_t status;
+
+    if (sig) {
+        buffer_size = sig_block;
+    }
 
     ucs_mpool_params_reset(&mp_params);
     allocator->memh           = NULL;
@@ -912,9 +913,7 @@ memory_allocator_init(ucp_context_h context, const size_t buffer_size,
     mp_params.max_chunk_size  = -1;
     mp_params.ops             = &memory_allocator_ops;
     mp_params.name            = "mpool_allocator";
-    if (sig) {
-        mp_params.alignment   = 4096;
-    }
+    mp_params.alignment       = 1;
     status                    = ucs_mpool_init(&mp_params, &allocator->mpool);
     if (status != UCS_OK) {
         return status;
@@ -985,6 +984,11 @@ static int init_worker(ucp_context_h ucp_context, ucp_worker_h *ucp_worker,
         if (sig) {
             worker_params.field_mask |= UCP_WORKER_PARAM_FIELD_FLAGS;
             worker_params.flags      |= UCP_WORKER_FLAG_SIGNATURE;
+
+            worker_params.user_allocator.stride = sig_block +
+                                                  sizeof(ucs_mpool_elem_t);
+            worker_params.user_allocator.offset = sizeof(ucs_mpool_elem_t) +
+                                                  sizeof(ucs_mpool_chunk_t);
         }
     }
 
@@ -1143,8 +1147,7 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
     int                    ret;
 
     if (user_allocator) {
-        status = memory_allocator_init(ucp_context, ALLOCATOR_PAYLOAD_LENGTH,
-                                      &allocator_obj);
+        status = memory_allocator_init(ucp_context, &allocator_obj);
         if (status != UCS_OK) {
             ret = -1;
             fprintf(stderr, "failed to create memory allocator (%s)\n",
