@@ -541,8 +541,7 @@ uct_base_iface_init_rx_buffers_allocator(uct_base_iface_t *iface,
         }
 
         iface->rx_allocator.user_allocator = 1;
-        iface->rx_allocator.allocator.cb   = params->rx_allocator.cb;
-        iface->rx_allocator.allocator.arg  = params->rx_allocator.arg;
+        iface->rx_allocator.allocator      = params->rx_allocator;
     } else {
         /*
          * We use this mpool config to prevent the default

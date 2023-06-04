@@ -1553,6 +1553,7 @@ uct_rc_mlx5_iface_common_seg_set_sge_payload_entry(
 
     if (poll_flags & UCT_RC_MLX5_POLL_FLAG_SIG) {
         status = uct_ib_mlx5_sig_mr_get_data(md, base_iface->rx_allocator.cache.memh,
+                                             &base_iface->rx_allocator.allocator.sig_attr,
                                              desc->payload, &payload, &payload_lkey);
         if (status != UCS_OK) {
             return status;

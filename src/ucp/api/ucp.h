@@ -1243,7 +1243,7 @@ typedef size_t (*ucp_mem_allocator_cb_t)(void *arg, size_t num_of_buffers,
 
 typedef struct {
     /**
-     * User memory allocator get buf function used by UCX in post receive. 
+     * User memory allocator get buf function used by UCX in post receive.
      */
     ucp_mem_allocator_cb_t cb;
 
@@ -1257,6 +1257,17 @@ typedef struct {
      * This will be the size of the active message fragment.
      */
     size_t                 buffer_size;
+
+    /**
+     * Stride in buffer provided by memory allocator. Should be greater than
+     * or equal to buffer_size.
+     */
+    size_t                 stride;
+
+    /**
+     * Offset of first block in buffer provided by memory allocatore.
+     */
+    size_t                 offset;
 } ucp_user_mem_allocator_t;
 
 

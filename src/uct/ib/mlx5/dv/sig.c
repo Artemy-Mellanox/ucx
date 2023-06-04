@@ -25,7 +25,7 @@
 #define UCT_IB_MLX5_BSF_REPEAT_BLOCK                  UCS_BIT(7)
 #define UCT_IB_MLX5_MKEY_BSF_EN                       UCS_BIT(30)
 #define UCT_IB_MLX5_WQE_UMR_CTRL_MKEY_MASK_BSF_ENABLE UCS_BIT(12)
-
+#define UCS_IB_MLX5_SIGNATURE_BLOCK_4048              4048
 
 struct uct_ib_mlx5_bsf_inl {
     uint16_t vld_refresh;
@@ -257,7 +257,8 @@ static void* uct_ib_mlx5_sig_umr_start(uct_ib_mlx5_txwq_t *txwq,
 }
 
 ucs_status_t uct_ib_mlx5_sig_mr_init(uct_ib_mlx5_md_t *md,
-                                     uct_ib_mlx5_mem_t *memh)
+                                     uct_ib_mlx5_mem_t *memh,
+                                     const uct_sig_attr_t *sig_attr)
 {
     uct_ib_mlx5_txwq_t *txwq = uct_ib_umr_get_txwq(md->umr);
     uct_ib_mlx5_sig_t *sig;
@@ -266,17 +267,23 @@ ucs_status_t uct_ib_mlx5_sig_mr_init(uct_ib_mlx5_md_t *md,
     size_t length;
     void *wqe;
 
+    if (sig_attr->block != UCS_IB_MLX5_SIGNATURE_BLOCK_4048) {
+        ucs_error("unsuported signature block size: %zd", sig_attr->block);
+        return UCS_ERR_INVALID_PARAM;
+    }
+
     sig = ucs_malloc(sizeof(*sig), "sig");
     if (sig == NULL) {
         ucs_error("Cannot allocate signature context");
         return UCS_ERR_NO_MEMORY;
     }
 
-    sig->mr = memh->mrs[UCT_IB_MR_DEFAULT].super.ib;
-    ucs_assert_always(!ucs_check_if_align_pow2((uintptr_t)sig->mr->addr,
-                                               UCT_IB_MLX5_T10DIF_BLOCK));
-    length = sig->mr->length;
-    num_elems = length / UCT_IB_MLX5_T10DIF_BLOCK;
+    sig->block  = sig_attr->block;
+    sig->stride = sig_attr->stride;
+    sig->mr     = memh->mrs[UCT_IB_MR_DEFAULT].super.ib;
+    sig->start  = sig->mr->addr + sig_attr->offset;
+    length      = sig->mr->length;
+    num_elems   = length / sig->block;
 
     sig->dif = ucs_mmap(NULL, num_elems * 8, PROT_READ|PROT_WRITE,
                         MAP_PRIVATE|MAP_ANONYMOUS, -1, 0, "sig dif");
@@ -297,15 +304,15 @@ ucs_status_t uct_ib_mlx5_sig_mr_init(uct_ib_mlx5_md_t *md,
         goto err_dereg_dif;
     }
 
-    wqe = uct_ib_mlx5_sig_umr_start(txwq, 4, 4, (UCT_IB_MLX5_T10DIF_BLOCK + 8) * num_elems);
+    wqe = uct_ib_mlx5_sig_umr_start(txwq, 4, 4, (sig->block + 8) * num_elems);
     wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
-    wqe = uct_ib_mlx5_sig_set_stride_ctrl(wqe, num_elems, UCT_IB_MLX5_T10DIF_BLOCK + 8, 2);
-    wqe = uct_ib_mlx5_sig_set_stride(wqe, sig->mr->lkey, UCT_IB_MLX5_T10DIF_BLOCK,
-                                     UCT_IB_MLX5_T10DIF_STRIDE, sig->mr->addr);
+    wqe = uct_ib_mlx5_sig_set_stride_ctrl(wqe, num_elems, sig->block + 8, 2);
+    wqe = uct_ib_mlx5_sig_set_stride(wqe, sig->mr->lkey, sig->block,
+                                     sig->stride, sig->start);
     wqe = uct_ib_mlx5_sig_set_stride(wqe, sig->dif_mr->lkey, 8, 8, sig->dif);
     wqe = uct_ib_mlx5_sig_umr_round_bb(wqe);
     wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
-    wqe = uct_ib_mlx5_sig_set_bsf(wqe, UCT_IB_MLX5_T10DIF_BLOCK * num_elems, md->psv.idx);
+    wqe = uct_ib_mlx5_sig_set_bsf(wqe, sig->block * num_elems, md->psv.idx);
 
     status = uct_ib_umr_post(md->umr, wqe, htobe32(sig->sig_key));
     if (status != UCS_OK) {
@@ -336,7 +343,7 @@ ucs_status_t uct_ib_mlx5_sig_mr_cleanup(uct_ib_mlx5_mem_t *memh)
     int ret;
 
     length    = sig->mr->length;
-    num_elems = length / UCT_IB_MLX5_T10DIF_BLOCK;
+    num_elems = length / sig->block;
 
     ret = mlx5dv_devx_obj_destroy(sig->sig_mr);
     if (ret != 0) {
