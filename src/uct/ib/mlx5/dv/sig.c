@@ -19,13 +19,19 @@
 
 
 #define UCT_IB_MLX5_DIF_IPCS                          0x2
-#define UCT_IB_MLX5_BLOCK_SIZE_IDX                    0x6
 #define UCT_IB_MLX5_STRIDE_BLOCK_OP                   0x400
 #define UCT_IB_MLX5_BSF_INL_VALID                     UCS_BIT(15)
 #define UCT_IB_MLX5_BSF_REPEAT_BLOCK                  UCS_BIT(7)
 #define UCT_IB_MLX5_MKEY_BSF_EN                       UCS_BIT(30)
 #define UCT_IB_MLX5_WQE_UMR_CTRL_MKEY_MASK_BSF_ENABLE UCS_BIT(12)
-#define UCS_IB_MLX5_SIGNATURE_BLOCK_4048              4048
+
+static const uint32_t uct_ib_mlx5_sig_block[] = {
+    [1] = 512,
+    [2] = 520,
+    [3] = 4096,
+    [4] = 4160,
+    [6] = 4048,
+};
 
 struct uct_ib_mlx5_bsf_inl {
     uint16_t vld_refresh;
@@ -170,7 +176,7 @@ static ucs_status_t uct_ib_mlx5_sig_reg_mr(uct_ib_mlx5_md_t *md, int list_size,
 }
 
 static void* uct_ib_mlx5_sig_set_bsf(void *seg, uint32_t data_size,
-                                     uint32_t psv_idx)
+                                     uint32_t psv_idx, int bs)
 {
     struct uct_ib_mlx5_bsf *bsf = seg;
     struct uct_ib_mlx5_bsf_basic *basic = &bsf->basic;
@@ -181,7 +187,7 @@ static void* uct_ib_mlx5_sig_set_bsf(void *seg, uint32_t data_size,
     basic->bsf_size_sbs  = 1 << 7;
     basic->raw_data_size = htonl(data_size);
 
-    basic->mem.bs_selector = UCT_IB_MLX5_BLOCK_SIZE_IDX;
+    basic->mem.bs_selector = bs;
     basic->m_bfs_psv       = htonl(psv_idx);
 
     inl              = &bsf->m_inl;
@@ -278,9 +284,22 @@ ucs_status_t uct_ib_mlx5_sig_mr_init(uct_ib_mlx5_md_t *md,
     unsigned num_elems;
     size_t length;
     void *wqe;
+    int bs;
 
-    if (sig_attr->block != UCS_IB_MLX5_SIGNATURE_BLOCK_4048) {
-        ucs_error("unsuported signature block size: %zd", sig_attr->block);
+    if (sig_attr->stride < sig_attr->block) {
+        ucs_error("signature stide(%zd) should be greater or equal to block size(%zd)",
+                  sig_attr->stride, sig_attr->block);
+        return UCS_ERR_INVALID_PARAM;
+    }
+
+    for (bs = 0; bs < ucs_static_array_size(uct_ib_mlx5_sig_block); bs++) {
+        if (uct_ib_mlx5_sig_block[bs] == sig_attr->block) {
+            break;
+        }
+    }
+
+    if (bs == ucs_static_array_size(uct_ib_mlx5_sig_block)) {
+        ucs_error("unsupported signature block size: %zd", sig_attr->block);
         return UCS_ERR_INVALID_PARAM;
     }
 
@@ -325,7 +344,7 @@ ucs_status_t uct_ib_mlx5_sig_mr_init(uct_ib_mlx5_md_t *md,
         wqe = uct_ib_mlx5_sig_set_stride(wqe, sig->dif_mr->lkey, 8, 8, sig->dif);
         wqe = uct_ib_mlx5_sig_umr_round_bb(wqe);
         wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
-        wqe = uct_ib_mlx5_sig_set_bsf(wqe, sig->block * num_elems, md->psv.idx);
+        wqe = uct_ib_mlx5_sig_set_bsf(wqe, sig->block * num_elems, md->psv.idx, bs);
     } else if (md->super.config.sig_mode == UCT_IB_SIG_STRIDE) {
         wqe = uct_ib_mlx5_sig_umr_start(txwq, 4, 0, sig->block * num_elems);
         wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
@@ -342,7 +361,7 @@ ucs_status_t uct_ib_mlx5_sig_mr_init(uct_ib_mlx5_md_t *md,
         wqe = uct_ib_mlx5_sig_umr_round_bb(wqe);
         wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
     } else {
-        ucs_error("Wrong signature debug mode");
+        ucs_error("Wrong signature debug mode: %d", md->super.config.sig_mode);
         status = UCS_ERR_INVALID_PARAM;
         goto err_free_sig_mr;
     }

@@ -663,7 +663,9 @@ static void usage()
                     "transfer function call. (default = %ld).\n",
                     iov_cnt);
     fprintf(stderr, "  -u Use this option to run the example with rx buffers allocator implementing the user allocator API.\n");
-    fprintf(stderr, "  -S Use this option to run the example with signature handover.\n");
+    fprintf(stderr, "  -S Use this option to run the example with signature handover."
+                    " Value is signature block size."
+                    " Supported values are 512, 520, 4048, 4096, 4160.\n");
     print_common_help();
     fprintf(stderr, "\n");
 }
@@ -677,7 +679,7 @@ static int parse_cmd(int argc, char *const argv[], char **server_addr,
     int c = 0;
     int port;
 
-    while ((c = getopt(argc, argv, "a:l:p:c:6i:s:v:m:uhS")) != -1) {
+    while ((c = getopt(argc, argv, "a:l:p:c:6i:s:v:m:uhS:")) != -1) {
         switch (c) {
         case 'a':
             *server_addr = optarg;
@@ -737,6 +739,7 @@ static int parse_cmd(int argc, char *const argv[], char **server_addr,
             break;
         case 'S':
             sig = 1;
+            sig_block = atoi(optarg);
             break;
         case 'h':
         default:
