@@ -70,6 +70,12 @@ enum {
     UCT_IB_DEVX_OBJ_DCI
 };
 
+typedef enum {
+    UCT_IB_SIG_FULL,
+    UCT_IB_SIG_STRIDE,
+    UCT_IB_SIG_KLM
+} uct_ib_sig_mode_t;
+
 typedef struct uct_ib_md_ext_config {
     int                      eth_pause;    /**< Whether or not Pause Frame is
                                                 enabled on the Ethernet network */
@@ -93,6 +99,7 @@ typedef struct uct_ib_md_ext_config {
                                                        invalidated memory keys
                                                        that are kept idle before
                                                        reuse*/
+    uct_ib_sig_mode_t        sig_mode;
 } uct_ib_md_ext_config_t;
 
 

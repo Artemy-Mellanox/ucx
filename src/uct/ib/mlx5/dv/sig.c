@@ -218,6 +218,18 @@ static void* uct_ib_mlx5_sig_set_stride(void* seg, uint32_t lkey, size_t size,
     return UCS_PTR_TYPE_OFFSET(seg, (*sentry));
 }
 
+static void* uct_ib_mlx5_set_klm(void* seg, uint32_t lkey, size_t size,
+                                 void* buff)
+{
+    struct mlx5_wqe_umr_klm_seg *klm = seg;
+
+    klm->byte_count = htonl(size);
+    klm->mkey       = htonl(lkey);
+    klm->address    = htobe64((uintptr_t)buff);
+
+   return UCS_PTR_TYPE_OFFSET(seg, (*klm));
+}
+
 static void* uct_ib_mlx5_sig_umr_round_bb(void *seg)
 {
     void *next = (void *)ucs_align_up((uintptr_t)seg, 64);
@@ -304,15 +316,36 @@ ucs_status_t uct_ib_mlx5_sig_mr_init(uct_ib_mlx5_md_t *md,
         goto err_dereg_dif;
     }
 
-    wqe = uct_ib_mlx5_sig_umr_start(txwq, 4, 4, (sig->block + 8) * num_elems);
-    wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
-    wqe = uct_ib_mlx5_sig_set_stride_ctrl(wqe, num_elems, sig->block + 8, 2);
-    wqe = uct_ib_mlx5_sig_set_stride(wqe, sig->mr->lkey, sig->block,
-                                     sig->stride, sig->start);
-    wqe = uct_ib_mlx5_sig_set_stride(wqe, sig->dif_mr->lkey, 8, 8, sig->dif);
-    wqe = uct_ib_mlx5_sig_umr_round_bb(wqe);
-    wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
-    wqe = uct_ib_mlx5_sig_set_bsf(wqe, sig->block * num_elems, md->psv.idx);
+    if (!ENABLE_DEBUG_DATA || (md->super.config.sig_mode == UCT_IB_SIG_FULL)) {
+        wqe = uct_ib_mlx5_sig_umr_start(txwq, 4, 4, (sig->block + 8) * num_elems);
+        wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
+        wqe = uct_ib_mlx5_sig_set_stride_ctrl(wqe, num_elems, sig->block + 8, 2);
+        wqe = uct_ib_mlx5_sig_set_stride(wqe, sig->mr->lkey, sig->block,
+                                         sig->stride, sig->start);
+        wqe = uct_ib_mlx5_sig_set_stride(wqe, sig->dif_mr->lkey, 8, 8, sig->dif);
+        wqe = uct_ib_mlx5_sig_umr_round_bb(wqe);
+        wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
+        wqe = uct_ib_mlx5_sig_set_bsf(wqe, sig->block * num_elems, md->psv.idx);
+    } else if (md->super.config.sig_mode == UCT_IB_SIG_STRIDE) {
+        wqe = uct_ib_mlx5_sig_umr_start(txwq, 4, 0, sig->block * num_elems);
+        wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
+        wqe = uct_ib_mlx5_sig_set_stride_ctrl(wqe, num_elems, sig->block, 1);
+        wqe = uct_ib_mlx5_sig_set_stride(wqe, sig->mr->lkey, sig->block,
+                                         sig->stride, sig->start);
+        wqe = uct_ib_mlx5_sig_umr_round_bb(wqe);
+        wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
+    } else if (md->super.config.sig_mode == UCT_IB_SIG_KLM) {
+        wqe = uct_ib_mlx5_sig_umr_start(txwq, 4, 0, sig->block * num_elems);
+        wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
+        wqe = uct_ib_mlx5_set_klm(wqe, sig->mr->lkey, sig->block * num_elems,
+                                  sig->start);
+        wqe = uct_ib_mlx5_sig_umr_round_bb(wqe);
+        wqe = uct_ib_mlx5_txwq_wrap_exact(txwq, wqe);
+    } else {
+        ucs_error("Wrong signature debug mode");
+        status = UCS_ERR_INVALID_PARAM;
+        goto err_free_sig_mr;
+    }
 
     status = uct_ib_umr_post(md->umr, wqe, htobe32(sig->sig_key));
     if (status != UCS_OK) {

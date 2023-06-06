@@ -58,6 +58,12 @@ static const char *uct_ib_devx_objs[] = {
     NULL
 };
 
+const char *uct_ib_sig_mode[] = {
+    [UCT_IB_SIG_FULL]   = "full",
+    [UCT_IB_SIG_STRIDE] = "stride",
+    [UCT_IB_SIG_KLM]    = "klm",
+};
+
 static ucs_config_field_t uct_ib_md_config_table[] = {
     {"", "", NULL,
      ucs_offsetof(uct_ib_md_config_t, super), UCS_CONFIG_TYPE_TABLE(uct_md_config_table)},
@@ -190,6 +196,13 @@ static ucs_config_field_t uct_ib_md_config_table[] = {
     {"MAX_IDLE_RKEY_COUNT", "16",
      "Maximal number of invalidated memory keys that are kept idle before reuse.",
      ucs_offsetof(uct_ib_md_config_t, ext.max_idle_rkey_count), UCS_CONFIG_TYPE_UINT},
+
+#if ENABLE_DEBUG_DATA
+    {"SIG_DEBUG_MODE", "full",
+     "Enable partial payload processing when calculating signature",
+     ucs_offsetof(uct_ib_md_config_t, ext.sig_mode),
+     UCS_CONFIG_TYPE_ENUM(uct_ib_sig_mode)},
+#endif
 
     {NULL}
 };
@@ -1622,6 +1635,10 @@ ucs_status_t uct_ib_md_open_common(uct_ib_md_t *md,
 
     if (md->config.odp.max_size == UCS_MEMUNITS_AUTO) {
         md->config.odp.max_size = 0;
+    }
+
+    if (!ENABLE_DEBUG_DATA) {
+        md->config.sig_mode = UCT_IB_SIG_FULL;
     }
 
     /* Create statistics */
