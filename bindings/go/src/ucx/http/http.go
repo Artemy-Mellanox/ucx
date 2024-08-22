@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/Artemy-Mellanox/ucx/bindings/go/src/ucx"
@@ -77,9 +78,10 @@ type responseWriter struct {
 	status   int
 	body     []byte
 	bodyLock sync.Mutex
-	done chan bool
+	done     chan bool
 	content  bytes.Buffer
 	left     int
+	id	 string
 }
 
 func (w *responseWriter) Header() http.Header {
@@ -116,15 +118,16 @@ func (w *responseWriter) Write(data []byte) (int, error) {
 		body = w.content.Bytes()
 	}
 
-	myreq := map[string]string{
-		"code": strconv.Itoa(w.status),
+	headerMap := map[string]string{
+		"ucx-code": strconv.Itoa(w.status),
+		"ucx-id": w.id,
 	}
 
 	for k, v := range w.headers {
-		myreq[k] = v[0]
+		headerMap[k] = v[0]
 	}
 
-	header, err := json.Marshal(myreq)
+	header, err := json.Marshal(headerMap)
 	if err != nil {
 		return 0, err
 	}
@@ -152,6 +155,7 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 }
 
 type amDataReader struct {
+	id string
 	data *ucx.UcpAmData
 	left int
 	ptr unsafe.Pointer
@@ -261,17 +265,22 @@ func (s *Server) response(header unsafe.Pointer, headerSize uint64, data *ucx.Uc
 		fmt.Printf("response %v\n", err)
 		return ucx.UCS_ERR_IO_ERROR
 	}
-	req, _ := http.NewRequest(headerMap["method"], headerMap["url"], reader)
+	req, _ := http.NewRequest(headerMap["ucx-method"], headerMap["ucx-url"], reader)
 	for k, v := range headerMap {
-		req.Header.Set(k,v)
+		if !strings.HasPrefix(k, "ucx-") {
+			req.Header.Set(k,v)
+		}
 	}
 	req.ContentLength = int64(data.Length())
+	req.RequestURI = req.URL.EscapedPath()
 	writer := &responseWriter{
 		server: s,
 		replyEp: replyEp,
 		headers: make(http.Header),
+		id: headerMap["ucx-id"],
 	}
 	s.eps = append(s.eps, replyEp)
+	reader.id = headerMap["ucx-id"]
 
 	go s.handler.ServeHTTP(writer, req)
 	if data.CanPersist() {
@@ -349,10 +358,16 @@ func StartServer(addr string, handler http.Handler) (serve func() error, err err
 	return
 }
 
+type tracker struct {
+	resp chan *http.Response
+	id string
+}
+
 type Transport struct {
 	context
 	ep *ucx.UcpEp
-	resp chan *http.Response
+	currId int32
+	reqs sync.Map
 	quit chan bool
 }
 
@@ -365,7 +380,7 @@ func (a *Transport) recvResponse(header unsafe.Pointer, headerSize uint64, data 
 	resp := &http.Response{
 		Header: make(http.Header),
 		Body: reader,
-		Status: headerMap["code"],
+		Status: headerMap["ucx-code"],
 	}
 
 	statusCode, _, _ := strings.Cut(resp.Status, " ")
@@ -377,7 +392,8 @@ func (a *Transport) recvResponse(header unsafe.Pointer, headerSize uint64, data 
 		resp.Header.Set(k,v)
 	}
 
-	a.resp <- resp
+	req, _ := a.reqs.Load(headerMap["ucx-id"])
+	req.(*tracker).resp <- resp
 	if data.CanPersist() {
 		return ucx.UCS_INPROGRESS
 	} else {
@@ -404,7 +420,6 @@ func (a *Transport) progress() {
 func NewTransport(addr string) (*Transport, error) {
 	a := new(Transport)
 	a.Init()
-	a.resp = make(chan *http.Response, 1)
 	a.quit = make(chan bool, 1)
 
 	a.worker.SetAmRecvHandler(AM_RESP, ucx.UCP_AM_FLAG_PERSISTENT_DATA, a.recvResponse)
@@ -428,16 +443,18 @@ func NewTransport(addr string) (*Transport, error) {
 }
 
 func (a *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	myreq := map[string]string{
-		"method": req.Method,
-		"url": req.URL.String(),
+	reqId := strconv.Itoa(int(atomic.AddInt32(&a.currId, 1)))
+	headerMap := map[string]string{
+		"ucx-method": req.Method,
+		"ucx-url": req.URL.String(),
+		"ucx-id": reqId,
 	}
 
 	for k, v := range req.Header {
-		myreq[k] = v[0]
+		headerMap[k] = v[0]
 	}
 
-	header, err := json.Marshal(myreq)
+	header, err := json.Marshal(headerMap)
 	if err != nil {
 		return nil, err
 	}
@@ -450,6 +467,9 @@ func (a *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 
+	tr := &tracker{ resp: make(chan *http.Response, 1), id: reqId }
+	a.reqs.Store(reqId, tr)
+
 	headerPtr, headerLen := getBuf(header)
 	dataPtr, dataLen := getBuf(data)
 	send, err := a.ep.SendAmNonBlocking(AM_REQ,
@@ -459,5 +479,8 @@ func (a *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	defer send.Close()
-	return <-a.resp, nil
+	resp := <-tr.resp
+	a.reqs.Delete(reqId)
+
+	return resp, nil
 }
