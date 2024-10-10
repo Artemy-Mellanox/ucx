@@ -294,8 +294,4 @@ git_clone_with_retry() {
 
 setup_go_env() {
     go env -w GO111MODULE=auto
-    cat <<EOF >> bindings/go/go.work
-use .
-replace github.com/openucx/ucx/bindings/go v0.0.0-00010101000000-000000000000 => $(pwd)/bindings/go
-EOF
 }
