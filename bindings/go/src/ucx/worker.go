@@ -7,6 +7,15 @@ package ucx
 
 // #include <ucp/api/ucp.h>
 // #include "goucx.h"
+//
+// int ucp_worker_progress_wait(ucp_worker_h worker) {
+//   int n;
+//   int c = 8;
+//   do {
+//     n = ucp_worker_progress(worker);
+//   } while (n == 0 && --c > 0);
+//   return n;
+// }
 import "C"
 import (
 	"unsafe"
@@ -122,6 +131,10 @@ func (w *UcpWorker) Arm() UcsStatus {
 // communication progress.
 func (w *UcpWorker) Progress() uint {
 	return uint(C.ucp_worker_progress(w.worker))
+}
+
+func (w *UcpWorker) ProgressWait() uint {
+	return uint(C.ucp_worker_progress_wait(w.worker))
 }
 
 // This routine waits (blocking) until an event has happened, as part of the

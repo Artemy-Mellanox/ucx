@@ -56,7 +56,7 @@ goperftest: $(GOTMPDIR)
 	cd $(abs_top_srcdir)/bindings/go/src/examples/perftest ;\
 	$(GO) build --tags=$(GOTAGS) -o ${GOTMPDIR}/goperftest
 
-run-perftest:
+run-perftest: goperftest
 	cd $(abs_top_srcdir)/bindings/go/src/examples/perftest ;\
 	LD_LIBRARY_PATH=$(UCX_SOPATH):${LD_LIBRARY_PATH} ${GOTMPDIR}/goperftest ${ARGS}
 

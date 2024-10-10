@@ -30,6 +30,7 @@ type PerfTestParams struct {
 	ip            string
 	printIter     uint
 	warmUpIter    uint
+	window	      int
 }
 
 type PerfTest struct {
@@ -40,9 +41,13 @@ type PerfTest struct {
 	listener             *UcpListener
 	eps                  []*UcpEp
 	reverseEps           []*UcpEp
+	numOutstandingRequests int32
 	numCompletedRequests uint32
 	wg                   sync.WaitGroup
 	completionTime       []time.Duration
+	nextStat	     time.Time
+	lastI		     uint
+	amParam		     UcpRequestParams
 }
 
 var perfTestParams = PerfTestParams{}
@@ -64,15 +69,16 @@ func printHeader() {
 }
 
 func printPerThreadStatistics(i uint, t uint) {
-	bw := float64(perfTestParams.messageSize) * float64(8e-9) / perfTest.completionTime[t].Seconds()
+	bw := float64(perfTestParams.messageSize) * float64(i - perfTest.lastI) * float64(1e-9)
 	fmt.Printf("|%20s|%20s|%20s|%20f|\n", fmt.Sprintf("%v/%v", t+1, perfTestParams.numThreads),
 		fmt.Sprintf("%v/%v", i, perfTestParams.numIterations), perfTest.completionTime[t], bw)
+	perfTest.lastI = i
 }
 
 func printTotalStatistics(duration time.Duration) {
 	totalBytesTransfered := perfTestParams.messageSize * uint64(perfTestParams.numThreads) * uint64(perfTestParams.numIterations)
 	avgLat := float64(duration.Milliseconds()) / float64(perfTestParams.numIterations)
-	avgBw := float64(totalBytesTransfered) * float64(8e-9) / duration.Seconds()
+	avgBw := float64(totalBytesTransfered) * float64(1e-9) / duration.Seconds()
 
 	dashes := strings.Repeat("-", 20)
 	fmt.Printf("|%20s|%20s|%20s|%20s|\n", dashes, dashes, dashes, dashes)
@@ -127,7 +133,8 @@ func initMemory() error {
 }
 
 func initWorker(i int) {
-	workerParams := (&UcpWorkerParams{}).SetThreadMode(UCS_THREAD_MODE_MULTI)
+	//workerParams := (&UcpWorkerParams{}).SetThreadMode(UCS_THREAD_MODE_MULTI)
+	workerParams := (&UcpWorkerParams{}).SetThreadMode(UCS_THREAD_MODE_SERIALIZED)
 
 	if perfTestParams.wakeup {
 		workerParams.WakeupTX()
@@ -197,8 +204,7 @@ func initListener() error {
 }
 
 func progressWorker(i int) {
-	for perfTest.perThreadWorkers[i].Progress() != 0 {
-	}
+	perfTest.perThreadWorkers[i].ProgressWait()
 	if perfTestParams.wakeup {
 		perfTest.perThreadWorkers[i].Wait()
 	}
@@ -230,17 +236,24 @@ func close() {
 	}
 }
 
+func serverAmCb(request *UcpRequest, status UcsStatus, length uint64) {
+	atomic.AddUint32(&perfTest.numCompletedRequests, 1)
+	request.Close()
+}
+
 func serverAmRecvHandler(header unsafe.Pointer, headerSize uint64, data *UcpAmData, replyEp *UcpEp) UcsStatus {
-	tid := *(*uint)(header)
+	var tid uint
+	if headerSize == 8 {
+		tid = *(*uint)(header)
+	} else {
+		tid = 0
+	}
 	if data.IsDataValid() {
 		atomic.AddUint32(&perfTest.numCompletedRequests, 1)
 	} else {
-		data.Receive(getAddressOffsetForThread(tid), perfTestParams.messageSize,
-			(&UcpRequestParams{}).SetMemType(perfTestParams.memType).SetCallback(func(request *UcpRequest, status UcsStatus, length uint64) {
-				atomic.AddUint32(&perfTest.numCompletedRequests, 1)
-				request.Close()
-			}))
+		data.Receive(getAddressOffsetForThread(tid), perfTestParams.messageSize, &perfTest.amParam)
 	}
+
 	return UCS_OK
 }
 
@@ -249,6 +262,8 @@ func serverStart() error {
 	if err := initMemory(); err != nil {
 		return err
 	}
+
+	perfTest.amParam.SetMemType(perfTestParams.memType).SetCallback(serverAmCb).SetMulti().SetMemory(perfTest.memory)
 	// 1 global worker for listener progress and N threads for data receive.
 	perfTest.perThreadWorkers = make([]*UcpWorker, perfTestParams.numThreads+1)
 	initWorker(0)
@@ -259,7 +274,8 @@ func serverStart() error {
 	// Submit AM recv handler for each thread
 	for t := uint(0); t < perfTestParams.numThreads; t += 1 {
 		initWorker(int(t) + 1)
-		perfTest.perThreadWorkers[t+1].SetAmRecvHandler(t, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
+		//perfTest.perThreadWorkers[t+1].SetAmRecvHandler(t, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
+		perfTest.perThreadWorkers[t+1].SetAmRecvHandler(t, 0, serverAmRecvHandler)
 	}
 
 	totalNumRequests := uint32((perfTestParams.warmUpIter + perfTestParams.numIterations) * perfTestParams.numThreads)
@@ -280,30 +296,37 @@ func serverStart() error {
 	return nil
 }
 
+func clientAmCb(request *UcpRequest, status UcsStatus) {
+	atomic.AddInt32(&perfTest.numOutstandingRequests, -1)
+	request.Close()
+}
+
 func clientThreadDoIter(i int, t uint) {
 	tryCudaSetDevice()
 
 	start := time.Now()
-	var request *UcpRequest
-	requestParams := (&UcpRequestParams{}).SetMemType(perfTestParams.memType)
-
-	header := unsafe.Pointer(&t)
-	request, _ = perfTest.eps[t].SendAmNonBlocking(t, header, uint64(unsafe.Sizeof(t)), getAddressOffsetForThread(t), perfTestParams.messageSize, 0, requestParams)
-
-	for request.GetStatus() == UCS_INPROGRESS {
-		progressWorker(int(t))
+	var header unsafe.Pointer
+	var headerSize uint64
+	if t != 0 {
+		header = unsafe.Pointer(&t)
+		headerSize = uint64(unsafe.Sizeof(t))
 	}
-	if request.GetStatus() != UCS_OK {
-		errorString := fmt.Sprintf("Request completion error: %v", request.GetStatus().String())
-		panic(errorString)
-	}
-	perfTest.completionTime[t] = time.Since(start)
-	request.Close()
 
-	if (i > 0) && (uint(i)%perfTestParams.printIter) == 0 {
+	atomic.AddInt32(&perfTest.numOutstandingRequests, 1)
+
+	_, err := perfTest.eps[t].SendAmNonBlocking(t, header, headerSize, getAddressOffsetForThread(t), perfTestParams.messageSize, 0, &perfTest.amParam)
+	if (err != nil) {
+		panic(err)
+	}
+
+	if start.After(perfTest.nextStat) {
 		printPerThreadStatistics(uint(i), t)
+		perfTest.nextStat = start.Add(time.Second)
 	}
-	perfTest.wg.Done()
+
+	if perfTestParams.numThreads > 1 {
+		perfTest.wg.Done()
+	}
 }
 
 func clientStart() error {
@@ -312,6 +335,7 @@ func clientStart() error {
 		return err
 	}
 
+	perfTest.amParam.SetMemType(perfTestParams.memType).SetCallback(clientAmCb).SetMulti().SetMemory(perfTest.memory)
 	perfTest.perThreadWorkers = make([]*UcpWorker, perfTestParams.numThreads)
 	perfTest.eps = make([]*UcpEp, perfTestParams.numThreads)
 	for i := 0; i < int(perfTestParams.numThreads); i += 1 {
@@ -323,20 +347,34 @@ func clientStart() error {
 
 	var totalDuration time.Duration = 0
 	printHeader()
+	perfTest.nextStat = time.Now().Add(time.Second)
+	var start time.Time
 	for i := -int(perfTestParams.warmUpIter); i < int(perfTestParams.numIterations); i += 1 {
-		perfTest.wg.Add(int(perfTestParams.numThreads))
-		for t := uint(0); t < perfTestParams.numThreads; t += 1 {
-			go clientThreadDoIter(i, t)
-		}
-		perfTest.wg.Wait()
-		var maxDuration time.Duration = 0
-		for _, threadDuration := range perfTest.completionTime {
-			if threadDuration > maxDuration {
-				maxDuration = threadDuration
+		if perfTestParams.numThreads > 1 {
+			perfTest.wg.Add(int(perfTestParams.numThreads))
+			for t := uint(0); t < perfTestParams.numThreads; t += 1 {
+				go clientThreadDoIter(i, t)
 			}
+			perfTest.wg.Wait()
+			var maxDuration time.Duration = 0
+			for _, threadDuration := range perfTest.completionTime {
+				if threadDuration > maxDuration {
+					maxDuration = threadDuration
+				}
+			}
+			totalDuration += maxDuration
+		} else {
+			if i == 0 {
+				start = time.Now()
+			}
+			for atomic.LoadInt32(&perfTest.numOutstandingRequests) == int32(perfTestParams.window) {
+				progressWorker(0)
+			}
+			clientThreadDoIter(i, 0)
+			totalDuration += perfTest.completionTime[0]
 		}
-		totalDuration += maxDuration
 	}
+	totalDuration = time.Since(start)
 	printTotalStatistics(totalDuration)
 
 	close()
@@ -352,6 +390,7 @@ func main() {
 	flag.BoolVar(&perfTestParams.wakeup, "wakeup", false, "use polling: false(default)")
 	flag.UintVar(&perfTestParams.warmUpIter, "warmup", 5, "warmup iterations: 5(default)")
 	flag.StringVar(&perfTestParams.ip, "i", "", "server address to connect")
+	flag.IntVar(&perfTestParams.window, "w", 64, "window")
 
 	perfTestParams.memType = UCS_MEMORY_TYPE_HOST
 	flag.CommandLine.Func("m", "memory type: host(default), cuda", func(p string) error {
