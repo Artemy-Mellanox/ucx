@@ -255,7 +255,8 @@ func serverAmRecvHandler(header unsafe.Pointer, headerSize uint64, data *UcpAmDa
 	if data.IsDataValid() {
 		atomic.AddUint32(&perfTest.numCompletedRequests, 1)
 	} else {
-		data.Receive(getAddressOffsetForThread(tid), perfTestParams.messageSize, &perfTest.amParam)
+		req, _ := data.Receive(getAddressOffsetForThread(tid), perfTestParams.messageSize, &perfTest.amParam)
+		req.Release()
 	}
 
 	return UCS_OK
@@ -267,7 +268,7 @@ func serverStart() error {
 		return err
 	}
 
-	perfTest.amParam.SetMemType(perfTestParams.memType).SetCallback(serverAmCb).SetMulti().SetMemory(perfTest.memory)
+	perfTest.amParam.SetMemType(perfTestParams.memType).SetMulti().SetMemory(perfTest.memory).SetNoImmCmpl()
 	// 1 global worker for listener progress and N threads for data receive.
 	perfTest.perThreadWorkers = make([]*UcpWorker, perfTestParams.numThreads+1)
 	initWorker(0)

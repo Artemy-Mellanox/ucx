@@ -22,6 +22,7 @@ type UcpRequestParams struct {
 	memType    UcsMemoryType
 	Cb         UcpCallback
 	multi	   bool
+	noImCmpl   bool
 	Memory	   *UcpMemory
 }
 
@@ -33,6 +34,11 @@ func (p *UcpRequestParams) SetMemType(memType UcsMemoryType) *UcpRequestParams {
 
 func (p *UcpRequestParams) SetMulti() *UcpRequestParams {
 	p.multi = true
+	return p
+}
+
+func (p *UcpRequestParams) SetNoImmCmpl() *UcpRequestParams {
+	p.noImCmpl = true
 	return p
 }
 
@@ -67,6 +73,10 @@ func packParams(params *UcpRequestParams, p *C.ucp_request_param_t, cb unsafe.Po
 
 	if params.multi {
 		p.op_attr_mask |= C.UCP_OP_ATTR_FLAG_MULTI_SEND
+	}
+
+	if params.noImCmpl {
+		p.op_attr_mask |= C.UCP_OP_ATTR_FLAG_NO_IMM_CMPL
 	}
 
 	if params.Memory != nil {
@@ -126,6 +136,13 @@ func (r *UcpRequest) GetStatus() UcsStatus {
 func (r *UcpRequest) Close() {
 	if r.request != nil {
 		C.ucp_request_free(r.request)
+		r.request = nil
+	}
+}
+
+func (r *UcpRequest) Release() {
+	if r.request != nil {
+		C.ucp_request_release(r.request)
 		r.request = nil
 	}
 }
