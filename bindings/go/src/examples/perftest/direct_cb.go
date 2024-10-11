@@ -52,3 +52,7 @@ func setAmRecvCallback(t uint, w *UcpWorker) {
 	w.SetAmRecvHandler2(t, UCP_AM_FLAG_WHOLE_MSG, unsafe.Pointer(C.amRecvCallback),
 			    unsafe.Pointer(ctx))
 }
+
+func setAmRecvCallback2(t uint, w *UcpWorker, cb unsafe.Pointer, ctx unsafe.Pointer) {
+	w.SetAmRecvHandler2(t, UCP_AM_FLAG_WHOLE_MSG, cb, ctx)
+}

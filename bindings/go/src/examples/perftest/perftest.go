@@ -34,7 +34,7 @@ type PerfTestParams struct {
 	printIter     uint
 	warmUpIter    uint
 	window	      int
-	C             bool
+	C             string
 }
 
 type PerfTest struct {
@@ -262,6 +262,10 @@ func serverAmRecvHandler(header unsafe.Pointer, headerSize uint64, data *UcpAmDa
 	return UCS_OK
 }
 
+func inc() {
+	atomic.AddUint32(&perfTest.numCompletedRequests, 1)
+}
+
 func serverStart() error {
 	initContext()
 	if err := initMemory(); err != nil {
@@ -276,14 +280,21 @@ func serverStart() error {
 		return err
 	}
 
+	var ctx C.perfCtx
 	// Submit AM recv handler for each thread
 	for t := uint(0); t < perfTestParams.numThreads; t += 1 {
 		initWorker(int(t) + 1)
 
-		if perfTestParams.C {
+		if perfTestParams.C == "cb" {
+			ctx.addr = getAddressOffsetForThread(0);
+			ctx.worker = C.ucp_worker_h(perfTest.perThreadWorkers[t+1].UCP())
+			ctx.messageSize = C.uint64_t(perfTestParams.messageSize)
+			ctx.mem = C.ucp_mem_h(perfTest.memory.UCP())
+			setAmRecvCallback2(t, perfTest.perThreadWorkers[t+1],
+					   unsafe.Pointer(C.serverCb),
+					   unsafe.Pointer(&ctx))
 		} else {
-			setAmRecvCallback(t, perfTest.perThreadWorkers[t+1])
-			//perfTest.perThreadWorkers[t+1].SetAmRecvHandler(t, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
+			perfTest.perThreadWorkers[t+1].SetAmRecvHandler(t, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
 		}
 	}
 
@@ -291,8 +302,7 @@ func serverStart() error {
 	perfTest.wg.Add(int(perfTestParams.numThreads + 1))
 	for t := uint(0); t < perfTestParams.numThreads+1; t += 1 {
 		go func(tid uint) {
-			if tid > 0 && perfTestParams.C {
-				var ctx C.perfCtx
+			if tid > 0 && perfTestParams.C == "full" {
 				ctx.addr = getAddressOffsetForThread(0);
 				ctx.worker = C.ucp_worker_h(perfTest.perThreadWorkers[tid].UCP())
 				ctx.messageSize = C.uint64_t(perfTestParams.messageSize)
@@ -367,7 +377,7 @@ func clientStart() error {
 	printHeader()
 	perfTest.nextStat = time.Now().Add(time.Second)
 	var start time.Time
-	if perfTestParams.C {
+	if perfTestParams.C == "client" {
 		var ctx C.perfCtx
 		ctx.numIterations = C.int(perfTestParams.numIterations)
 		ctx.messageSize = C.uint64_t(perfTestParams.messageSize)
@@ -420,7 +430,7 @@ func main() {
 	flag.UintVar(&perfTestParams.warmUpIter, "warmup", 5, "warmup iterations: 5(default)")
 	flag.StringVar(&perfTestParams.ip, "i", "", "server address to connect")
 	flag.IntVar(&perfTestParams.window, "w", 64, "window")
-	flag.BoolVar(&perfTestParams.C, "C", false, "in C")
+	flag.StringVar(&perfTestParams.C, "C", "", "in C")
 
 	perfTestParams.memType = UCS_MEMORY_TYPE_HOST
 	flag.CommandLine.Func("m", "memory type: host(default), cuda", func(p string) error {
