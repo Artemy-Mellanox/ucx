@@ -295,6 +295,27 @@ func (w *UcpWorker) SetAmRecvHandler(id uint, flags UcpAmCbFlags, cb UcpAmRecvCa
 	return nil
 }
 
+func (w *UcpWorker) SetAmRecvHandler2(id uint, flags UcpAmCbFlags, cb unsafe.Pointer,
+				     arg unsafe.Pointer) error {
+	var amHandlerParams C.ucp_am_handler_param_t
+	amHandlerParams.field_mask = C.UCP_AM_HANDLER_PARAM_FIELD_ID |
+		C.UCP_AM_HANDLER_PARAM_FIELD_FLAGS |
+		C.UCP_AM_HANDLER_PARAM_FIELD_CB |
+		C.UCP_AM_HANDLER_PARAM_FIELD_ARG
+	amHandlerParams.id = C.uint(id)
+	amHandlerParams.arg = arg
+	amHandlerParams.flags = C.uint32_t(flags)
+	cbAddr := (*unsafe.Pointer)(unsafe.Pointer(&amHandlerParams.cb))
+	*cbAddr = cb
+
+	status := C.ucp_worker_set_am_recv_handler(w.worker, &amHandlerParams)
+	if status != C.UCS_OK {
+		return newUcxError(status)
+	}
+
+	return nil
+}
+
 // Receive Active Message as defined by provided data descriptor.
 func (w *UcpWorker) RecvAmDataNonBlocking(dataDesc *UcpAmData, recvBuffer unsafe.Pointer, size uint64,
 	params *UcpRequestParams) (*UcpRequest, error) {
@@ -307,6 +328,21 @@ func (w *UcpWorker) RecvAmDataNonBlocking(dataDesc *UcpAmData, recvBuffer unsafe
 
 	cbId := packParams(params, &requestParams, unsafe.Pointer(C.ucxgo_completeAmRecvData))
 	request := C.ucp_am_recv_data_nbx(w.worker, dataDesc.dataPtr, recvBuffer, C.size_t(size), &requestParams)
+
+	return NewRequest(request, cbId, length)
+}
+
+func (w *UcpWorker) RecvAmDataNonBlocking2(data unsafe.Pointer, recvBuffer unsafe.Pointer, size uint64,
+	params *UcpRequestParams) (*UcpRequest, error) {
+	var requestParams C.ucp_request_param_t
+	var length C.size_t
+
+	requestParams.op_attr_mask = C.UCP_OP_ATTR_FIELD_RECV_INFO
+	recvInfoPtr := (**C.size_t)(unsafe.Pointer(&requestParams.recv_info[0]))
+	*recvInfoPtr = &length
+
+	cbId := packParams(params, &requestParams, unsafe.Pointer(C.ucxgo_completeAmRecvData))
+	request := C.ucp_am_recv_data_nbx(w.worker, data, recvBuffer, C.size_t(size), &requestParams)
 
 	return NewRequest(request, cbId, length)
 }

@@ -280,8 +280,10 @@ func serverStart() error {
 	for t := uint(0); t < perfTestParams.numThreads; t += 1 {
 		initWorker(int(t) + 1)
 
-		if !perfTestParams.C {
-			perfTest.perThreadWorkers[t+1].SetAmRecvHandler(t, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
+		if perfTestParams.C {
+		} else {
+			setAmRecvCallback(t, perfTest.perThreadWorkers[t+1])
+			//perfTest.perThreadWorkers[t+1].SetAmRecvHandler(t, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
 		}
 	}
 

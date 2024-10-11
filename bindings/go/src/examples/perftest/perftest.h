@@ -2,7 +2,6 @@
 #include <sys/time.h>
 
 #include <stdio.h>
-#include <alloca.h>
 
 typedef struct {
 	int numIterations;
