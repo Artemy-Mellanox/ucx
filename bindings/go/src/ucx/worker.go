@@ -9,14 +9,6 @@ package ucx
 // #include "goucx.h"
 // #include "worker.h"
 //
-// int ucp_worker_progress_wait(ucp_worker_h worker) {
-//   int n;
-//   /* int c = 8; */
-//   do {
-//     n = ucp_worker_progress(worker);
-//   } while (n == 0/* && --c > 0*/);
-//   return n;
-// }
 import "C"
 import (
 	"unsafe"

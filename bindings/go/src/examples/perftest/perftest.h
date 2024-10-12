@@ -23,6 +23,7 @@ void clientCb(void *req, ucs_status_t status, void *arg) {
 	perfCtx *ctx = arg;
 
 	ctx->numOutstandingRequests--;
+	//printf("%s:%d %p %d\n", __func__, __LINE__, req, ctx->numOutstandingRequests);
 	ucp_request_free(req);
 }
 
@@ -31,6 +32,7 @@ void clientRun(perfCtx *ctx) {
 	struct timeval t1, t2, d;
 	gettimeofday(&t1, 0);
 	int lastI = 0;
+	int i;
 
 	ucp_request_param_t  amParam;
 
@@ -39,7 +41,7 @@ void clientRun(perfCtx *ctx) {
 	amParam.user_data = ctx;
 	amParam.cb.send = &clientCb;
 
-	for (int i = 0; i < ctx->numIterations; i++) {
+	for (i = 0; i < ctx->numIterations; i++) {
 		while (ctx->numOutstandingRequests == ctx->window) {
 			int n;
 			do {

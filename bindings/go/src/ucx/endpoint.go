@@ -89,3 +89,23 @@ func (e *UcpEp) SendAmNonBlocking(id uint, header unsafe.Pointer, headerSize uin
 	request := C.ucp_am_send_nbx(e.ep, C.uint(id), header, C.size_t(headerSize), data, C.size_t(dataSize), &requestParams)
 	return NewRequest(request, cbId, nil)
 }
+
+func (e *UcpEp) SendAmNonBlocking2(id uint, header unsafe.Pointer, headerSize uint64,
+	data unsafe.Pointer, dataSize uint64, flags UcpAmSendFlags, params *UcpRequestParams,
+	cb unsafe.Pointer, arg unsafe.Pointer) (*UcpRequest, error) {
+	var requestParams C.ucp_request_param_t
+
+	packParams2(params, &requestParams, cb, arg)
+
+	requestParams.op_attr_mask |= C.UCP_OP_ATTR_FIELD_FLAGS
+	requestParams.flags = C.uint(flags)
+
+	request := C.ucp_am_send_nbx(e.ep, C.uint(id), header, C.size_t(headerSize), data, C.size_t(dataSize), &requestParams)
+	if !isRequestPtr(request) {
+		panic("imm compl")
+	}
+	ucpRequest := &UcpRequest{}
+	ucpRequest.request = unsafe.Pointer(uintptr(request))
+	ucpRequest.Status = UCS_INPROGRESS
+	return ucpRequest, nil
+}

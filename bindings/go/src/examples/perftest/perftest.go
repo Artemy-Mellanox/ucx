@@ -52,6 +52,7 @@ type PerfTest struct {
 	nextStat	     time.Time
 	lastI		     uint
 	amParam		     UcpRequestParams
+	c                    C.perfCtx
 }
 
 var perfTestParams = PerfTestParams{}
@@ -341,9 +342,22 @@ func clientThreadDoIter(i int, t uint) {
 		headerSize = uint64(unsafe.Sizeof(t))
 	}
 
-	atomic.AddInt32(&perfTest.numOutstandingRequests, 1)
-
-	_, err := perfTest.eps[t].SendAmNonBlocking(t, header, headerSize, getAddressOffsetForThread(t), perfTestParams.messageSize, 0, &perfTest.amParam)
+	var err error
+	if perfTestParams.C == "cb" {
+		perfTest.c.numOutstandingRequests += 1
+		_, err = perfTest.eps[t].SendAmNonBlocking2(t, header, headerSize, 
+						     getAddressOffsetForThread(t),
+						     perfTestParams.messageSize, 0,
+						     &perfTest.amParam,
+						     unsafe.Pointer(C.clientCb),
+						     unsafe.Pointer(&perfTest.c))
+        } else {
+		atomic.AddInt32(&perfTest.numOutstandingRequests, 1)
+		_, err = perfTest.eps[t].SendAmNonBlocking(t, header, headerSize, 
+						     getAddressOffsetForThread(t),
+						     perfTestParams.messageSize, 0,
+						     &perfTest.amParam)
+        }
 	if (err != nil) {
 		panic(err)
 	}
@@ -407,8 +421,14 @@ func clientStart() error {
 			if i == 0 {
 				start = time.Now()
 			}
-			for atomic.LoadInt32(&perfTest.numOutstandingRequests) == int32(perfTestParams.window) {
-				progressWorker(0)
+			if perfTestParams.C == "cb" {
+				for perfTest.c.numOutstandingRequests == C.int(perfTestParams.window) {
+					progressWorker(0)
+				}
+			} else {
+				for atomic.LoadInt32(&perfTest.numOutstandingRequests) == int32(perfTestParams.window) {
+					progressWorker(0)
+				}
 			}
 			clientThreadDoIter(i, 0)
 			totalDuration += perfTest.completionTime[0]

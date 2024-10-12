@@ -87,6 +87,41 @@ func packParams(params *UcpRequestParams, p *C.ucp_request_param_t, cb unsafe.Po
 	return cbId
 }
 
+func packParams2(params *UcpRequestParams, p *C.ucp_request_param_t, cb unsafe.Pointer,
+	         arg unsafe.Pointer) uint64 {
+	if params == nil {
+		return 0
+	}
+
+	var cbId uint64
+	if params.Cb != nil {
+		p.op_attr_mask |= C.UCP_OP_ATTR_FIELD_CALLBACK | C.UCP_OP_ATTR_FIELD_USER_DATA
+		cbAddr := (*unsafe.Pointer)(unsafe.Pointer(&p.cb[0]))
+		*cbAddr = cb
+		p.user_data = arg
+	}
+
+	if params.memTypeSet {
+		p.op_attr_mask |= C.UCP_OP_ATTR_FIELD_MEMORY_TYPE
+		p.memory_type = C.ucs_memory_type_t(params.memType)
+	}
+
+	if params.multi {
+		p.op_attr_mask |= C.UCP_OP_ATTR_FLAG_MULTI_SEND
+	}
+
+	if params.noImCmpl {
+		p.op_attr_mask |= C.UCP_OP_ATTR_FLAG_NO_IMM_CMPL
+	}
+
+	if params.Memory != nil {
+		p.op_attr_mask |= C.UCP_OP_ATTR_FIELD_MEMH
+		p.memh = params.Memory.memHandle
+	}
+
+	return cbId
+}
+
 // Checks whether request is a pointer
 func isRequestPtr(request C.ucs_status_ptr_t) bool {
 	errLast := UCS_ERR_LAST

@@ -1,5 +1,16 @@
 #include <stdlib.h>
 
+int ucp_worker_progress_wait(ucp_worker_h worker) {
+	int n;
+	int c = 8000;
+
+	do {
+		n = ucp_worker_progress(worker);
+	} while (n == 0 && --c > 0);
+
+	return n;
+}
+
 #define QUEUE_SIZE 1024
 
 typedef struct {
