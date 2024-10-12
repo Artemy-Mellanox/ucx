@@ -7,13 +7,14 @@ package ucx
 
 // #include <ucp/api/ucp.h>
 // #include "goucx.h"
+// #include "worker.h"
 //
 // int ucp_worker_progress_wait(ucp_worker_h worker) {
 //   int n;
-//   int c = 8;
+//   /* int c = 8; */
 //   do {
 //     n = ucp_worker_progress(worker);
-//   } while (n == 0 && --c > 0);
+//   } while (n == 0/* && --c > 0*/);
 //   return n;
 // }
 import "C"
@@ -40,6 +41,8 @@ import (
 // optimize concurrent communications.
 type UcpWorker struct {
 	worker C.ucp_worker_h
+	q *C.am_queue_t
+	ci uint
 }
 
 type UcpAddress struct {
@@ -314,6 +317,53 @@ func (w *UcpWorker) SetAmRecvHandler2(id uint, flags UcpAmCbFlags, cb unsafe.Poi
 	}
 
 	return nil
+}
+
+func (w *UcpWorker) SetAmRecvHandler3(id uint, flags UcpAmCbFlags, cb UcpAmRecvCallback) error {
+	var amHandlerParams C.ucp_am_handler_param_t
+	cbId := register(cb)
+
+	amHandlerParams.field_mask = C.UCP_AM_HANDLER_PARAM_FIELD_ID |
+		C.UCP_AM_HANDLER_PARAM_FIELD_FLAGS |
+		C.UCP_AM_HANDLER_PARAM_FIELD_CB |
+		C.UCP_AM_HANDLER_PARAM_FIELD_ARG
+	amHandlerParams.id = C.uint(id)
+	amHandlerParams.arg = unsafe.Pointer(C.am_ctx_init(C.int(cbId), w.q))
+	amHandlerParams.flags = C.uint32_t(flags)
+	cbAddr := (*C.ucp_am_recv_callback_t)(unsafe.Pointer(&amHandlerParams.cb))
+	*cbAddr = (C.ucp_am_recv_callback_t)(C.am_data_handler)
+
+	status := C.ucp_worker_set_am_recv_handler(w.worker, &amHandlerParams)
+	if status != C.UCS_OK {
+		return newUcxError(status)
+	}
+
+	return nil
+}
+
+func (w *UcpWorker) ProcessCallbacks() int {
+	pi := uint(w.q.pi);
+	n := 0
+	for (w.ci != pi) {
+		am := w.q.q[w.ci]
+		cbId := uint64(am.id)
+		if callback, found := getCallback(cbId); found {
+			amData := &UcpAmData{
+				worker:  w,
+				flags:   UcpAmRecvAttrs(am.attr),
+				dataPtr: am.data,
+				length:  uint64(am.length),
+			}
+			callback.(UcpAmRecvCallback)(nil, 0, amData, nil)
+		}
+		w.ci = (w.ci + 1) % C.QUEUE_SIZE;
+		n++
+	}
+	return n;
+}
+
+func am_queue_init() *C.am_queue_t {
+	return C.am_queue_init()
 }
 
 // Receive Active Message as defined by provided data descriptor.

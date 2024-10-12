@@ -212,6 +212,9 @@ func progressWorker(i int) {
 	if perfTestParams.wakeup {
 		perfTest.perThreadWorkers[i].Wait()
 	}
+	if perfTestParams.C == "defer" {
+		perfTest.perThreadWorkers[i].ProcessCallbacks()
+	}
 }
 
 func close() {
@@ -262,10 +265,6 @@ func serverAmRecvHandler(header unsafe.Pointer, headerSize uint64, data *UcpAmDa
 	return UCS_OK
 }
 
-func inc() {
-	atomic.AddUint32(&perfTest.numCompletedRequests, 1)
-}
-
 func serverStart() error {
 	initContext()
 	if err := initMemory(); err != nil {
@@ -293,6 +292,8 @@ func serverStart() error {
 			setAmRecvCallback2(t, perfTest.perThreadWorkers[t+1],
 					   unsafe.Pointer(C.serverCb),
 					   unsafe.Pointer(&ctx))
+		} else if perfTestParams.C == "defer" {
+			perfTest.perThreadWorkers[t+1].SetAmRecvHandler3(t, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
 		} else {
 			perfTest.perThreadWorkers[t+1].SetAmRecvHandler(t, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
 		}
