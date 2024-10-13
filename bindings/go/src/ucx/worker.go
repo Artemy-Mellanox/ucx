@@ -5,10 +5,8 @@
 
 package ucx
 
-// #include <ucp/api/ucp.h>
 // #include "goucx.h"
 // #include "worker.h"
-//
 import "C"
 import (
 	"unsafe"

@@ -1,32 +1,36 @@
+#include <ucp/api/ucp.h>
+
 #include <stdlib.h>
+#include <string.h>
 
 int ucp_worker_progress_wait(ucp_worker_h worker) {
 	int n;
-	int c = 8000;
+	//int c = 8;
 
 	do {
 		n = ucp_worker_progress(worker);
-	} while (n == 0 && --c > 0);
+	} while (n == 0); // && --c > 0);
 
 	return n;
 }
 
-#define QUEUE_SIZE 1024
+//#define QUEUE_SIZE 1024
+#define QUEUE_SIZE 128
 
 typedef struct {
-	unsigned id;
+	unsigned long id;
 	void *data;
 	size_t length;
-	unsigned attr;
+	unsigned long attr;
 } am_data_t;
 
 typedef struct {
 	am_data_t q[QUEUE_SIZE];
-	unsigned pi;
+	unsigned long pi;
 } am_queue_t;
 
 typedef struct {
-	int id;
+	unsigned long id;
 	am_queue_t *q;
 } am_ctx_t;
 
@@ -56,6 +60,7 @@ am_data_handler(void *arg, const void *header, size_t header_length,
 
 am_queue_t *am_queue_init() 
 {
-	am_queue_t *queue = calloc(1, sizeof *queue);
+	am_queue_t *queue = valloc(sizeof *queue);
+	memset(queue, 0, sizeof *queue);
 	return queue;
 }
