@@ -209,12 +209,15 @@ func initListener() error {
 }
 
 func progressWorker(i int) {
-	perfTest.perThreadWorkers[i].ProgressWait()
+	n := perfTest.perThreadWorkers[i].ProgressWait()
 	if perfTestParams.wakeup {
 		perfTest.perThreadWorkers[i].Wait()
 	}
-	if perfTestParams.C == "defer" {
-		perfTest.perThreadWorkers[i].ProcessCallbacks()
+	if perfTestParams.C == "defer" && n > 0 {
+		m := perfTest.perThreadWorkers[i].ProcessCallbacks()
+		if m == 0 {
+			fmt.Printf("ProcessCallbacks %d %d\n", n, m)
+		}
 	}
 }
 
@@ -290,7 +293,7 @@ func serverStart() error {
 			ctx.worker = C.ucp_worker_h(perfTest.perThreadWorkers[t+1].UCP())
 			ctx.messageSize = C.uint64_t(perfTestParams.messageSize)
 			ctx.mem = C.ucp_mem_h(perfTest.memory.UCP())
-			setAmRecvCallback2(t, perfTest.perThreadWorkers[t+1],
+			perfTest.perThreadWorkers[t+1].SetAmRecvHandler2(t, UCP_AM_FLAG_WHOLE_MSG,
 					   unsafe.Pointer(C.serverCb),
 					   unsafe.Pointer(&ctx))
 		} else if perfTestParams.C == "defer" {
@@ -392,7 +395,7 @@ func clientStart() error {
 	printHeader()
 	perfTest.nextStat = time.Now().Add(time.Second)
 	var start time.Time
-	if perfTestParams.C == "client" {
+	if perfTestParams.C == "full" {
 		var ctx C.perfCtx
 		ctx.numIterations = C.int(perfTestParams.numIterations)
 		ctx.messageSize = C.uint64_t(perfTestParams.messageSize)

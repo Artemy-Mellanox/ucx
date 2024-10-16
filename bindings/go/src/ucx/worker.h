@@ -3,17 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-int ucp_worker_progress_wait(ucp_worker_h worker) {
-	int n;
-	//int c = 8;
-
-	do {
-		n = ucp_worker_progress(worker);
-	} while (n == 0); // && --c > 0);
-
-	return n;
-}
-
 //#define QUEUE_SIZE 1024
 #define QUEUE_SIZE 128
 
@@ -63,4 +52,16 @@ am_queue_t *am_queue_init()
 	am_queue_t *queue = valloc(sizeof *queue);
 	memset(queue, 0, sizeof *queue);
 	return queue;
+}
+
+int ucp_worker_progress_wait(ucp_worker_h worker, am_queue_t *queue) {
+	unsigned long pi = queue->pi;
+	int c = 256;
+	int n = 0;
+
+	do {
+		n += ucp_worker_progress(worker);
+	} while (queue->pi == pi /*(queue->pi - pi) % QUEUE_SIZE < 1 && --c > 0); //n == 0); */ && --c > 0);
+
+	return n;
 }

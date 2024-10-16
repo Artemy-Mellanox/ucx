@@ -127,7 +127,7 @@ func (w *UcpWorker) Progress() uint {
 }
 
 func (w *UcpWorker) ProgressWait() uint {
-	return uint(C.ucp_worker_progress_wait(w.worker))
+	return uint(C.ucp_worker_progress_wait(w.worker, w.q))
 }
 
 // This routine waits (blocking) until an event has happened, as part of the
