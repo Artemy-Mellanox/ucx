@@ -337,7 +337,6 @@ func clientAmCb(request *UcpRequest, status UcsStatus) {
 func clientThreadDoIter(i int, t uint) {
 	tryCudaSetDevice()
 
-	start := time.Now()
 	var header unsafe.Pointer
 	var headerSize uint64
 	if t != 0 {
@@ -365,9 +364,12 @@ func clientThreadDoIter(i int, t uint) {
 		panic(err)
 	}
 
-	if start.After(perfTest.nextStat) {
-		printPerThreadStatistics(uint(i), t)
-		perfTest.nextStat = start.Add(time.Second)
+	if i % 100 == 0 {
+		start := time.Now()
+		if start.After(perfTest.nextStat) {
+			printPerThreadStatistics(uint(i), t)
+			perfTest.nextStat = start.Add(time.Second)
+		}
 	}
 
 	if perfTestParams.numThreads > 1 {
