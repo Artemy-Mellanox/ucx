@@ -96,10 +96,5 @@ func (c *UcpContext) NewWorker(workerParams *UcpWorkerParams) (*UcpWorker, error
 		return nil, newUcxError(status)
 	}
 
-	q := am_queue_init()
-
-	return &UcpWorker{
-		worker: ucp_worker,
-		q: q,
-	}, nil
+	return newWorker(ucp_worker), nil
 }

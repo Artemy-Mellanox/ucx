@@ -8,6 +8,8 @@ package ucx
 // #include <ucp/api/ucp.h>
 // #include "goucx.h"
 // #include "endpoint.h"
+// #include "zero.h"
+// #include "worker.h"
 import "C"
 import (
 	"sync"
@@ -18,11 +20,13 @@ type UcpEp struct {
 	ep C.ucp_ep_h
 	pool sync.Pool
 	requestParams C.ucp_request_param_t
+	zw *C.zero_worker_t
+	w *UcpWorker
 }
 
 var errorHandles = make(map[C.ucp_ep_h]UcpEpErrHandler)
 
-func newEp(ep C.ucp_ep_h) *UcpEp {
+func newEp(ep C.ucp_ep_h, zw *C.zero_worker_t, w *UcpWorker) *UcpEp {
 	return &UcpEp{
 		ep: ep,
 		pool: sync.Pool{
@@ -30,7 +34,8 @@ func newEp(ep C.ucp_ep_h) *UcpEp {
 				return C.alloc_ucp_request_param()
 			},
 		},
-		//requestParams: C.alloc_ucp_request_param(),
+		zw: zw,
+		w: w,
 	}
 }
 
@@ -106,6 +111,22 @@ func (e *UcpEp) SendAmNonBlocking(id uint, header unsafe.Pointer, headerSize uin
 	return NewRequest(request, cbId, nil)
 }
 
+func (e *UcpEp) SendAmNonBlocking4(id uint, header unsafe.Pointer, headerSize uint64,
+	data unsafe.Pointer, dataSize uint64, flags UcpAmSendFlags, params *UcpRequestParams) (*UcpRequest, error) {
+	requestParams := &e.requestParams //pool.Get().(*C.ucp_request_param_t)
+
+	cbId := register(params.Cb)
+	cb := (*C.am_ctx_t)(e.w.pool.Get().(unsafe.Pointer))
+	cb.id = C.ulong(cbId)
+	packParams2(params, requestParams, C.comp_cb, unsafe.Pointer(cb))
+	requestParams.op_attr_mask |= C.UCP_OP_ATTR_FIELD_FLAGS
+	requestParams.flags = C.uint(flags)
+
+	request := C.ucp_am_send_nbx(e.ep, C.uint(id), header, C.size_t(headerSize), data, C.size_t(dataSize), requestParams)
+	//e.pool.Put(requestParams)
+	return NewRequest(request, cbId, nil)
+}
+
 func (e *UcpEp) SendAmNonBlocking3(id uint, header unsafe.Pointer, headerSize uint64,
 	data unsafe.Pointer, dataSize uint64, flags UcpAmSendFlags, params *UcpRequestParams) (*UcpRequest, error) {
 	requestParams := &e.requestParams //pool.Get().(*C.ucp_request_param_t)
@@ -115,7 +136,7 @@ func (e *UcpEp) SendAmNonBlocking3(id uint, header unsafe.Pointer, headerSize ui
 	requestParams.op_attr_mask |= C.UCP_OP_ATTR_FIELD_FLAGS
 	requestParams.flags = C.uint(flags)
 
-	request := C.zero_ucp_am_send_nbx(e.ep, C.uint(id), header, C.size_t(headerSize), data, C.size_t(dataSize), requestParams)
+	request := C.zero_ucp_am_send_nbx(e.zw, C.uint(id), header, C.size_t(headerSize), data, C.size_t(dataSize), requestParams)
 	//e.pool.Put(requestParams)
 	return NewRequest(request, cbId, nil)
 }

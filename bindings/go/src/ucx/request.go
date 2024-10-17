@@ -88,12 +88,11 @@ func packParams(params *UcpRequestParams, p *C.ucp_request_param_t, cb unsafe.Po
 }
 
 func packParams2(params *UcpRequestParams, p *C.ucp_request_param_t, cb unsafe.Pointer,
-	         arg unsafe.Pointer) uint64 {
+	         arg unsafe.Pointer) {
 	if params == nil {
-		return 0
+		return
 	}
 
-	var cbId uint64
 	if params.Cb != nil {
 		p.op_attr_mask |= C.UCP_OP_ATTR_FIELD_CALLBACK | C.UCP_OP_ATTR_FIELD_USER_DATA
 		cbAddr := (*unsafe.Pointer)(unsafe.Pointer(&p.cb[0]))
@@ -118,8 +117,6 @@ func packParams2(params *UcpRequestParams, p *C.ucp_request_param_t, cb unsafe.P
 		p.op_attr_mask |= C.UCP_OP_ATTR_FIELD_MEMH
 		p.memh = params.Memory.memHandle
 	}
-
-	return cbId
 }
 
 // Checks whether request is a pointer

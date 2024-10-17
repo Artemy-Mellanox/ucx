@@ -209,15 +209,16 @@ func initListener() error {
 }
 
 func progressWorker(i int) {
+	if perfTestParams.C == "zero" {
+		perfTest.perThreadWorkers[i].ProgressZero()
+	}
 	n := perfTest.perThreadWorkers[i].ProgressWait()
 	if perfTestParams.wakeup {
 		perfTest.perThreadWorkers[i].Wait()
 	}
 	if perfTestParams.C == "defer" && n > 0 {
-		m := perfTest.perThreadWorkers[i].ProcessCallbacks()
-		if m == 0 {
-			fmt.Printf("ProcessCallbacks %d %d\n", n, m)
-		}
+		perfTest.perThreadWorkers[i].ProcessCallbacks()
+		//if m == 0 { fmt.Printf("ProcessCallbacks %d %d\n", n, m) }
 	}
 }
 
@@ -345,7 +346,13 @@ func clientThreadDoIter(i int, t uint) {
 	}
 
 	var err error
-	if perfTestParams.C == "zero" {
+	if perfTestParams.C == "defer" {
+		atomic.AddInt32(&perfTest.numOutstandingRequests, 1)
+		_, err = perfTest.eps[t].SendAmNonBlocking4(t, header, headerSize, 
+						     getAddressOffsetForThread(t),
+						     perfTestParams.messageSize, 0,
+						     &perfTest.amParam)
+	} else if perfTestParams.C == "zero" {
 		_, err = perfTest.eps[t].SendAmNonBlocking3(t, header, headerSize, 
 						     getAddressOffsetForThread(t),
 						     perfTestParams.messageSize, 0,

@@ -7,8 +7,10 @@ package ucx
 
 // #include "goucx.h"
 // #include "worker.h"
+// #include "zero.h"
 import "C"
 import (
+	"sync"
 	"unsafe"
 )
 
@@ -35,6 +37,8 @@ type UcpWorker struct {
 	ci uint
 
 	requestParams C.ucp_request_param_t
+	z *C.zero_worker_t
+	pool sync.Pool
 }
 
 type UcpAddress struct {
@@ -53,6 +57,20 @@ type UcpWorkerAttributes struct {
 	Address        *UcpAddress
 	MaxAmHeader    uint64
 	MaxDebugString uint64
+}
+
+func newWorker(w C.ucp_worker_h) *UcpWorker {
+	q := C.am_queue_init()
+	return &UcpWorker{
+		z: C.zero_worker_init(),
+		worker: w,
+		pool: sync.Pool{
+			New: func() interface{} {
+				return unsafe.Pointer(C.am_ctx_init(0, q))
+			},
+		},
+		q: q,
+	}
 }
 
 func (w *UcpWorker) Close() {
@@ -130,6 +148,10 @@ func (w *UcpWorker) Progress() uint {
 
 func (w *UcpWorker) ProgressWait() uint {
 	return uint(C.ucp_worker_progress_wait(w.worker, w.q))
+}
+
+func (w UcpWorker) ProgressZero() {
+	C.zero_worker_progress(w.z)
 }
 
 // This routine waits (blocking) until an event has happened, as part of the
@@ -217,7 +239,7 @@ func (w *UcpWorker) NewEndpoint(epParams *UcpEpParams) (*UcpEp, error) {
 		errorHandles[ep] = epParams.errorHandler
 	}
 
-	return newEp(ep), nil
+	return newEp(ep, w.z, w), nil
 }
 
 // This routine receives a message that is described by the local address and size on the worker.
@@ -335,25 +357,32 @@ func (w *UcpWorker) ProcessCallbacks() int {
 	pi := uint(w.q.pi);
 	n := 0
 	for (w.ci != pi) {
-		am := w.q.q[w.ci]
-		cbId := uint64(am.id)
+		entry := w.q.q[w.ci]
+		cbId := uint64(entry.id)
 		if callback, found := getCallback(cbId); found {
-			amData := &UcpAmData{
-				worker:  w,
-				flags:   UcpAmRecvAttrs(am.attr),
-				dataPtr: am.data,
-				length:  uint64(am.length),
+			switch callback := callback.(type) {
+			case UcpAmRecvCallback:
+				am := (*C.am_t)(unsafe.Pointer(&entry.u[0]))
+				amData := &UcpAmData{
+					worker:  w,
+					flags:   UcpAmRecvAttrs(am.attr),
+					dataPtr: am.data,
+					length:  uint64(am.length),
+				}
+				callback(nil, 0, amData, nil)
+			case UcpSendCallback:
+				comp := (*C.comp_t)(unsafe.Pointer(&entry.u[0]))
+				req := &UcpRequest{}
+				req.request = comp.req
+				req.Status = UcsStatus(comp.status)
+				callback(req, req.Status)
+				w.pool.Put(unsafe.Pointer(comp.ctx))
 			}
-			callback.(UcpAmRecvCallback)(nil, 0, amData, nil)
 		}
 		w.ci = (w.ci + 1) % C.QUEUE_SIZE;
 		n++
 	}
 	return n;
-}
-
-func am_queue_init() *C.am_queue_t {
-	return C.am_queue_init()
 }
 
 // Receive Active Message as defined by provided data descriptor.
