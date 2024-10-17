@@ -345,7 +345,12 @@ func clientThreadDoIter(i int, t uint) {
 	}
 
 	var err error
-	if perfTestParams.C == "cb" {
+	if perfTestParams.C == "zero" {
+		_, err = perfTest.eps[t].SendAmNonBlocking3(t, header, headerSize, 
+						     getAddressOffsetForThread(t),
+						     perfTestParams.messageSize, 0,
+						     &perfTest.amParam)
+	} else if perfTestParams.C == "cb" {
 		perfTest.c.numOutstandingRequests += 1
 		_, err = perfTest.eps[t].SendAmNonBlocking2(t, header, headerSize, 
 						     getAddressOffsetForThread(t),
@@ -426,7 +431,9 @@ func clientStart() error {
 			if i == 0 {
 				start = time.Now()
 			}
-			if perfTestParams.C == "cb" {
+			if perfTestParams.C == "zero" {
+
+			} else if perfTestParams.C == "cb" {
 				for perfTest.c.numOutstandingRequests == C.int(perfTestParams.window) {
 					progressWorker(0)
 				}

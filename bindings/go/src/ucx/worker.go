@@ -33,6 +33,8 @@ type UcpWorker struct {
 	worker C.ucp_worker_h
 	q *C.am_queue_t
 	ci uint
+
+	requestParams C.ucp_request_param_t
 }
 
 type UcpAddress struct {
@@ -215,9 +217,7 @@ func (w *UcpWorker) NewEndpoint(epParams *UcpEpParams) (*UcpEp, error) {
 		errorHandles[ep] = epParams.errorHandler
 	}
 
-	return &UcpEp{
-		ep: ep,
-	}, nil
+	return newEp(ep), nil
 }
 
 // This routine receives a message that is described by the local address and size on the worker.
@@ -360,6 +360,7 @@ func am_queue_init() *C.am_queue_t {
 func (w *UcpWorker) RecvAmDataNonBlocking(dataDesc *UcpAmData, recvBuffer unsafe.Pointer, size uint64,
 	params *UcpRequestParams) (*UcpRequest, error) {
 	var requestParams C.ucp_request_param_t
+	//requestParams := &w.requestParams
 	var length C.size_t
 
 	requestParams.op_attr_mask = C.UCP_OP_ATTR_FIELD_RECV_INFO

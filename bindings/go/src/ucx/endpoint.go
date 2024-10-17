@@ -7,16 +7,32 @@ package ucx
 
 // #include <ucp/api/ucp.h>
 // #include "goucx.h"
+// #include "endpoint.h"
 import "C"
 import (
+	"sync"
 	"unsafe"
 )
 
 type UcpEp struct {
 	ep C.ucp_ep_h
+	pool sync.Pool
+	requestParams C.ucp_request_param_t
 }
 
 var errorHandles = make(map[C.ucp_ep_h]UcpEpErrHandler)
+
+func newEp(ep C.ucp_ep_h) *UcpEp {
+	return &UcpEp{
+		ep: ep,
+		pool: sync.Pool{
+			New: func() interface{} {
+				return C.alloc_ucp_request_param()
+			},
+		},
+		//requestParams: C.alloc_ucp_request_param(),
+	}
+}
 
 func setSendParams(goRequestParams *UcpRequestParams, cRequestParams *C.ucp_request_param_t) uint64 {
 	return packParams(goRequestParams, cRequestParams, unsafe.Pointer(C.ucxgo_completeGoSendRequest))
@@ -79,14 +95,28 @@ func (e *UcpEp) SendTagNonBlocking(tag uint64, address unsafe.Pointer, size uint
 // The maximum allowed header size can be obtained by querying worker attributes by the UcpWorker.Query() routine.
 func (e *UcpEp) SendAmNonBlocking(id uint, header unsafe.Pointer, headerSize uint64,
 	data unsafe.Pointer, dataSize uint64, flags UcpAmSendFlags, params *UcpRequestParams) (*UcpRequest, error) {
-	var requestParams C.ucp_request_param_t
+	requestParams := &e.requestParams
 
-	cbId := setSendParams(params, &requestParams)
+	cbId := setSendParams(params, requestParams)
 
 	requestParams.op_attr_mask |= C.UCP_OP_ATTR_FIELD_FLAGS
 	requestParams.flags = C.uint(flags)
 
-	request := C.ucp_am_send_nbx(e.ep, C.uint(id), header, C.size_t(headerSize), data, C.size_t(dataSize), &requestParams)
+	request := C.ucp_am_send_nbx(e.ep, C.uint(id), header, C.size_t(headerSize), data, C.size_t(dataSize), requestParams)
+	return NewRequest(request, cbId, nil)
+}
+
+func (e *UcpEp) SendAmNonBlocking3(id uint, header unsafe.Pointer, headerSize uint64,
+	data unsafe.Pointer, dataSize uint64, flags UcpAmSendFlags, params *UcpRequestParams) (*UcpRequest, error) {
+	requestParams := &e.requestParams //pool.Get().(*C.ucp_request_param_t)
+
+	cbId := setSendParams(params, requestParams)
+
+	requestParams.op_attr_mask |= C.UCP_OP_ATTR_FIELD_FLAGS
+	requestParams.flags = C.uint(flags)
+
+	request := C.zero_ucp_am_send_nbx(e.ep, C.uint(id), header, C.size_t(headerSize), data, C.size_t(dataSize), requestParams)
+	//e.pool.Put(requestParams)
 	return NewRequest(request, cbId, nil)
 }
 
