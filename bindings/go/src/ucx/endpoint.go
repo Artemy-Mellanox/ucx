@@ -113,16 +113,17 @@ func (e *UcpEp) SendAmNonBlocking(id uint, header unsafe.Pointer, headerSize uin
 
 func (e *UcpEp) SendAmNonBlocking4(id uint, header unsafe.Pointer, headerSize uint64,
 	data unsafe.Pointer, dataSize uint64, flags UcpAmSendFlags, params *UcpRequestParams) (*UcpRequest, error) {
-	requestParams := &e.requestParams //pool.Get().(*C.ucp_request_param_t)
+	var requestParams C.ucp_request_param_t
+	//requestParams := &e.requestParams //pool.Get().(*C.ucp_request_param_t)
 
 	cbId := register(params.Cb)
 	cb := (*C.am_ctx_t)(e.w.pool.Get().(unsafe.Pointer))
 	cb.id = C.ulong(cbId)
-	packParams2(params, requestParams, C.comp_cb, unsafe.Pointer(cb))
+	packParams2(params, &requestParams, C.comp_cb, unsafe.Pointer(cb))
 	requestParams.op_attr_mask |= C.UCP_OP_ATTR_FIELD_FLAGS
 	requestParams.flags = C.uint(flags)
 
-	request := C.ucp_am_send_nbx(e.ep, C.uint(id), header, C.size_t(headerSize), data, C.size_t(dataSize), requestParams)
+	request := C.ucp_am_send_nbx(e.ep, C.uint(id), header, C.size_t(headerSize), data, C.size_t(dataSize), &requestParams)
 	//e.pool.Put(requestParams)
 	return NewRequest(request, cbId, nil)
 }
