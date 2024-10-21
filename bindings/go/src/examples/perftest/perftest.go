@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"strings"
@@ -376,7 +377,7 @@ func clientThreadDoIter(i int, t uint) {
 		panic(err)
 	}
 
-	if i % 100 == 0 {
+	if false && i % 100 == 0 {
 		start := time.Now()
 		if start.After(perfTest.nextStat) {
 			printPerThreadStatistics(uint(i), t)
@@ -387,6 +388,14 @@ func clientThreadDoIter(i int, t uint) {
 	if perfTestParams.numThreads > 1 {
 		perfTest.wg.Done()
 	}
+}
+
+func nextSize(v uint64) uint64 {
+	pow2 := uint64(1);                                                               
+	for pow2 <= v { pow2 *= 2 }
+	v = uint64(float64(v) * math.Pow(2,1.0/7.0)) + 1;
+	if v > pow2 { v = pow2 }
+	return v
 }
 
 func clientStart() error {
@@ -409,52 +418,64 @@ func clientStart() error {
 	printHeader()
 	perfTest.nextStat = time.Now().Add(time.Second)
 	var start time.Time
-	if perfTestParams.C == "full" {
-		var ctx C.perfCtx
-		ctx.numIterations = C.int(perfTestParams.numIterations)
-		ctx.messageSize = C.uint64_t(perfTestParams.messageSize)
-		ctx.ep = C.ucp_ep_h(perfTest.eps[0].UCP())
-		ctx.mem = C.ucp_mem_h(perfTest.memory.UCP())
-		ctx.addr = getAddressOffsetForThread(0);
-		ctx.worker = C.ucp_worker_h(perfTest.perThreadWorkers[0].UCP())
-		ctx.window = C.int(perfTestParams.window)
-		C.clientRun(&ctx)
-	}
-	for i := -int(perfTestParams.warmUpIter); i < int(perfTestParams.numIterations); i += 1 {
-		if perfTestParams.numThreads > 1 {
-			perfTest.wg.Add(int(perfTestParams.numThreads))
-			for t := uint(0); t < perfTestParams.numThreads; t += 1 {
-				go clientThreadDoIter(i, t)
-			}
-			perfTest.wg.Wait()
-			var maxDuration time.Duration = 0
-			for _, threadDuration := range perfTest.completionTime {
-				if threadDuration > maxDuration {
-					maxDuration = threadDuration
-				}
-			}
-			totalDuration += maxDuration
-		} else {
-			if i == 0 {
-				start = time.Now()
-			}
-			if perfTestParams.C == "zero" {
+	//fmt.Printf("%f\n", math.Pow(2,1.0/3.0))
+	//return nil
+	for messageSize := uint64(256); messageSize < uint64(524288); messageSize = nextSize(messageSize) {
+		var bw float64
+		perfTestParams.messageSize = messageSize
 
-			} else if perfTestParams.C == "cb" {
-				for perfTest.c.numOutstandingRequests == C.int(perfTestParams.window) {
-					progressWorker(0)
-				}
-			} else {
-				for atomic.LoadInt32(&perfTest.numOutstandingRequests) == int32(perfTestParams.window) {
-					progressWorker(0)
+		if perfTestParams.C == "full" {
+			var ctx C.perfCtx
+			ctx.numIterations = C.int(perfTestParams.numIterations)
+			ctx.messageSize = C.uint64_t(perfTestParams.messageSize)
+			ctx.ep = C.ucp_ep_h(perfTest.eps[0].UCP())
+			ctx.mem = C.ucp_mem_h(perfTest.memory.UCP())
+			ctx.addr = getAddressOffsetForThread(0);
+			ctx.worker = C.ucp_worker_h(perfTest.perThreadWorkers[0].UCP())
+			ctx.window = C.int(perfTestParams.window)
+			ctx.warmup = C.int(perfTestParams.warmUpIter)
+			bw = float64(C.clientRun(&ctx))
+		} else {
+			for i := -int(perfTestParams.warmUpIter); i < int(perfTestParams.numIterations); i += 1 {
+				if perfTestParams.numThreads > 1 {
+					perfTest.wg.Add(int(perfTestParams.numThreads))
+					for t := uint(0); t < perfTestParams.numThreads; t += 1 {
+						go clientThreadDoIter(i, t)
+					}
+					perfTest.wg.Wait()
+					var maxDuration time.Duration = 0
+					for _, threadDuration := range perfTest.completionTime {
+						if threadDuration > maxDuration {
+							maxDuration = threadDuration
+						}
+					}
+					totalDuration += maxDuration
+				} else {
+					if i == 0 {
+						start = time.Now()
+					}
+					if perfTestParams.C == "zero" {
+
+					} else if perfTestParams.C == "cb" {
+						for perfTest.c.numOutstandingRequests == C.int(perfTestParams.window) {
+							progressWorker(0)
+						}
+					} else {
+						for atomic.LoadInt32(&perfTest.numOutstandingRequests) == int32(perfTestParams.window) {
+							progressWorker(0)
+						}
+					}
+					clientThreadDoIter(i, 0)
+					totalDuration += perfTest.completionTime[0]
 				}
 			}
-			clientThreadDoIter(i, 0)
-			totalDuration += perfTest.completionTime[0]
+			totalDuration = time.Since(start)
+
+			bw = float64(messageSize) * float64(perfTestParams.numIterations) /totalDuration.Seconds() * float64(1e-9)
 		}
+		fmt.Printf("%20d %20f\n", messageSize, bw)
 	}
-	totalDuration = time.Since(start)
-	printTotalStatistics(totalDuration)
+	//printTotalStatistics(totalDuration)
 
 	close()
 	return nil
@@ -467,7 +488,7 @@ func main() {
 	flag.UintVar(&perfTestParams.numIterations, "n", 1000, "Number of iterations to run: 1000(default)")
 	flag.UintVar(&perfTestParams.printIter, "printIter", 100, "Print summary every n iterations: 1000(default)")
 	flag.BoolVar(&perfTestParams.wakeup, "wakeup", false, "use polling: false(default)")
-	flag.UintVar(&perfTestParams.warmUpIter, "warmup", 5, "warmup iterations: 5(default)")
+	flag.UintVar(&perfTestParams.warmUpIter, "warmup", 1000, "warmup iterations: 5(default)")
 	flag.StringVar(&perfTestParams.ip, "i", "", "server address to connect")
 	flag.IntVar(&perfTestParams.window, "w", 64, "window")
 	flag.StringVar(&perfTestParams.C, "C", "", "in C")

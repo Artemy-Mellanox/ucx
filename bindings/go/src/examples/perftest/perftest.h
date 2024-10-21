@@ -7,6 +7,7 @@ typedef struct {
 	int numIterations;
 	uint64_t messageSize; 
 	int window;
+	int warmup;
 
 	ucp_context_h	     context;
 	ucp_mem_h	     mem;
@@ -27,7 +28,7 @@ void clientCb(void *req, ucs_status_t status, void *arg) {
 	ucp_request_free(req);
 }
 
-void clientRun(perfCtx *ctx) {
+double clientRun(perfCtx *ctx) {
 	ucs_status_ptr_t req;
 	struct timeval t1, t2, d;
 	gettimeofday(&t1, 0);
@@ -41,7 +42,10 @@ void clientRun(perfCtx *ctx) {
 	amParam.user_data = ctx;
 	amParam.cb.send = &clientCb;
 
-	for (i = 0; i < ctx->numIterations; i++) {
+	for (i = -ctx->warmup; i < ctx->numIterations; i++) {
+		if (i == 0) {
+			gettimeofday(&t1, 0);
+		}
 		while (ctx->numOutstandingRequests == ctx->window) {
 			int n;
 			do {
@@ -52,9 +56,10 @@ void clientRun(perfCtx *ctx) {
 		req = ucp_am_send_nbx(ctx->ep, 0, NULL, 0, ctx->addr, ctx->messageSize, &amParam);
 		if (UCS_PTR_IS_ERR(req)) {
 			printf("%s:%d \n", __func__, __LINE__);
-			return;
+			return 0.0;
 		}
 
+#if 0
 		gettimeofday(&t2, 0);
 		timersub(&t2, &t1, &d);
 		if (d.tv_sec*1000000+d.tv_usec >= 1000000) {
@@ -62,7 +67,11 @@ void clientRun(perfCtx *ctx) {
 			lastI = i;
 			t1 = t2;
 		}
+#endif		
 	}
+	gettimeofday(&t2, 0);
+	timersub(&t2, &t1, &d);
+	return ctx->messageSize * ctx->numIterations / 1000.0 / (d.tv_sec*1000000+d.tv_usec);
 }
 
 ucs_status_t serverCb(void *arg, const void *header, size_t header_length,
