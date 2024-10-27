@@ -8,6 +8,7 @@ typedef struct {
 	uint64_t messageSize; 
 	int window;
 	int warmup;
+	int stats;
 
 	ucp_context_h	     context;
 	ucp_mem_h	     mem;
@@ -59,15 +60,15 @@ double clientRun(perfCtx *ctx) {
 			return 0.0;
 		}
 
-#if 0
-		gettimeofday(&t2, 0);
-		timersub(&t2, &t1, &d);
-		if (d.tv_sec*1000000+d.tv_usec >= 1000000) {
-			printf("%0.2f\n", (i - lastI) * ctx->messageSize / 1e6);
-			lastI = i;
-			t1 = t2;
+		if (ctx->stats) {
+			gettimeofday(&t2, 0);
+			timersub(&t2, &t1, &d);
+			if (d.tv_sec*1000000+d.tv_usec >= 1000000) {
+				printf("%0.2f\n", (i - lastI) * ctx->messageSize / 1e6);
+				lastI = i;
+				t1 = t2;
+			}
 		}
-#endif		
 	}
 	gettimeofday(&t2, 0);
 	timersub(&t2, &t1, &d);

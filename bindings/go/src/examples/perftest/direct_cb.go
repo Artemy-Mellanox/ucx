@@ -33,7 +33,7 @@ func amRecvCallback(arg unsafe.Pointer, header unsafe.Pointer, headerSize C.size
 	}
 
 	if (params.recv_attr & C.UCP_AM_RECV_ATTR_FLAG_RNDV) != 0 {
-		req, _ := ctx.w.RecvAmDataNonBlocking2(data, getAddressOffsetForThread(tid), perfTestParams.messageSize, &perfTest.amParam)
+		req, _ := ctx.w.RecvAmDataNonBlocking2(data, getAddressOffsetForThread(tid, perfTest.size), perfTest.size, &perfTest.amParam)
 		req.Release()
 	}
 	atomic.AddUint32(&perfTest.numCompletedRequests, 1)
