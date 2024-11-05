@@ -203,6 +203,7 @@ typedef struct ucp_context_config {
     double                                 rcache_overhead;
     /** UCP extra operation attributes flags */
     uint64_t                               extra_op_attr_flags;
+    int                                    skip_recv_memcpy;
 } ucp_context_config_t;
 
 

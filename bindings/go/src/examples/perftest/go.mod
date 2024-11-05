@@ -1,6 +1,6 @@
 module github.com/openucx/ucx/bindings/go/examples/perftest
 
-go 1.23.2
+go 1.22.2
 
 require (
 	github.com/docker/go-units v0.5.0

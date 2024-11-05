@@ -1362,11 +1362,13 @@ ucp_am_find_first_rdesc(ucp_worker_h worker, ucp_ep_ext_t *ep_ext,
 
 static UCS_F_ALWAYS_INLINE void
 ucp_am_copy_data_fragment(ucp_recv_desc_t *first_rdesc, void *data,
-                          size_t length, size_t offset)
+                          size_t length, size_t offset, int skip)
 {
-    UCS_PROFILE_NAMED_CALL("am_memcpy_recv", ucs_memcpy_relaxed,
-                           UCS_PTR_BYTE_OFFSET(first_rdesc + 1, offset),
-                           data, length, UCS_ARCH_MEMCPY_NT_SOURCE, length);
+    if (!skip) {
+        UCS_PROFILE_NAMED_CALL("am_memcpy_recv", ucs_memcpy_relaxed,
+                               UCS_PTR_BYTE_OFFSET(first_rdesc + 1, offset),
+                               data, length, UCS_ARCH_MEMCPY_NT_SOURCE, length);
+    }
     first_rdesc->am_first.remaining -= length;
 }
 
@@ -1397,8 +1399,8 @@ ucp_am_handle_unfinished(ucp_worker_h worker, ucp_recv_desc_t *first_rdesc,
     size_t desc_offset, user_hdr_length, total_size;
     uint16_t am_id;
 
-    ucp_am_copy_data_fragment(first_rdesc, data, length, offset);
-
+    ucp_am_copy_data_fragment(first_rdesc, data, length, offset,
+                              worker->context->config.ext.skip_recv_memcpy);
     if (first_rdesc->am_first.remaining > 0) {
         /* not all fragments arrived yet */
         return;
@@ -1554,7 +1556,9 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_am_long_first_handler,
         ucp_am_copy_data_fragment(first_rdesc, mid_hdr + 1,
                                   mid_rdesc->length - UCP_AM_MID_FRAG_META_LEN,
                                   mid_hdr->offset +
-                                          first_rdesc->payload_offset);
+                                          first_rdesc->payload_offset,
+                                  worker->context->config.ext.skip_recv_memcpy);
+
         ucp_recv_desc_release(mid_rdesc);
     }
 
