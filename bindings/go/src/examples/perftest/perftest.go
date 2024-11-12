@@ -23,6 +23,30 @@ import (
 	"github.com/docker/go-units"
 )
 
+type ProgressMode int
+
+const (
+	Callback ProgressMode = iota
+	Broadcast
+)
+
+func (pm ProgressMode) String() string {
+	switch pm {
+	case Callback: return "callback"
+	case Broadcast: return "broadcast"
+	default: return ""
+	}
+}
+
+func (pm *ProgressMode) Set (value string) error {
+	switch strings.ToLower(value) {
+	case "callback", "cb": *pm = Callback
+	case "broadcast", "bc": *pm = Broadcast
+	default: return fmt.Errorf("unknown progress mode %s", value)
+	}
+	return nil
+}
+
 type PerfTestParams struct {
 	messageSizes  string
 	memType       UcsMemoryType
@@ -33,6 +57,7 @@ type PerfTestParams struct {
 	ip            string
 	printInterval float64
 	warmUpIter    uint
+	progressMode  ProgressMode
 }
 
 type PerfTest struct {
@@ -282,7 +307,7 @@ func initListener() error {
 }
 
 func progressWorker() {
-	for perfTest.worker.Progress() != 0 {
+	for perfTest.worker.Progress() == 0 {
 	}
 	if perfTestParams.wakeup {
 		perfTest.worker.Wait()
@@ -292,10 +317,12 @@ func progressWorker() {
 func progressThread() {
 	for atomic.LoadInt32(&perfTest.runProgress) == 1 {
 		progressWorker()
-		for _, ch := range perfTest.wake {
-			select {
-			case ch <- struct{}{}:
-			default:
+		if perfTestParams.progressMode == Broadcast {
+			for _, ch := range perfTest.wake {
+				select {
+				case ch <- struct{}{}:
+				default:
+				}
 			}
 		}
 	}
@@ -362,15 +389,26 @@ func clientThreadDoIter(t uint) {
 	tryCudaSetDevice()
 
 	requestParams := (&UcpRequestParams{}).SetMemType(perfTestParams.memType)
+	if perfTestParams.progressMode == Callback {
+		requestParams.SetCallback(func(request *UcpRequest, status UcsStatus){
+			perfTest.wake[t] <- struct{}{}
+		})
+	}
 
 	header := unsafe.Pointer(&t)
 	request, err := perfTest.ep.SendAmNonBlocking(0, header, uint64(unsafe.Sizeof(t)), getAddressOffsetForThread(t), perfTest.messageSize, 0, requestParams)
 	if err != nil {
 		panic(err)
 	}
-	for request.GetStatus() == UCS_INPROGRESS {
+
+	if perfTestParams.progressMode == Callback {
 		<-perfTest.wake[t]
+	} else {
+		for request.GetStatus() == UCS_INPROGRESS {
+			<-perfTest.wake[t]
+		}
 	}
+
 	if request.GetStatus() != UCS_OK {
 		errorString := fmt.Sprintf("Request completion error: %v", request.GetStatus().String())
 		panic(errorString)
@@ -401,7 +439,7 @@ func clientStart() error {
 
 	perfTest.wake = make([]chan struct{}, perfTestParams.numThreads)
 	for i := range perfTest.wake {
-		perfTest.wake[i] = make(chan struct{})
+		perfTest.wake[i] = make(chan struct{}, perfTestParams.numThreads)
 	}
 
 	warmUpIter := align(perfTestParams.warmUpIter, perfTestParams.numThreads)
@@ -463,6 +501,9 @@ func main() {
 	flag.BoolVar(&perfTestParams.wakeup, "wakeup", false, "use polling: false(default)")
 	flag.UintVar(&perfTestParams.warmUpIter, "warmup", 100, "warmup iterations")
 	flag.StringVar(&perfTestParams.ip, "i", "", "server address to connect")
+
+	perfTestParams.progressMode = Broadcast
+	flag.Var(&perfTestParams.progressMode, "progress", "progress mode")
 
 	perfTestParams.memType = UCS_MEMORY_TYPE_HOST
 	flag.Var(&perfTestParams.memType, "m", "memory type: host(default), cuda")
