@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/openucx/ucx/bindings/go/src/ucx"
@@ -389,7 +390,10 @@ func NewTransport(addr string) (*Transport, error) {
 }
 
 func (a *Transport) getCh() (int) {
-	return <- a.chPool
+	select {
+	case chId := <-a.chPool: return chId
+	case <-time.After(time.Second): panic("getCh timeout")
+	}
 }
 
 func (a *Transport) putCh(chId int) {
