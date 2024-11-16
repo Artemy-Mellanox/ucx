@@ -297,3 +297,29 @@ func (w *UcpWorker) RecvAmDataNonBlocking(dataDesc *UcpAmData, recvBuffer unsafe
 
 	return NewRequest(request, cbId, length)
 }
+
+type UcpPollElem struct {
+	elem C.ucp_stream_poll_ep_t
+}
+
+func (e UcpPollElem) Ep() *UcpEp {
+	return &UcpEp{ ep: e.elem.ep }
+}
+
+func (e UcpPollElem) ChId() uint64 {
+	return uint64(e.elem.ch_id)
+}
+
+func (w *UcpWorker) StreamPoll(max int) ([]UcpPollElem, error) {
+	var num C.ssize_t
+
+	pollElems := make([]C.ucp_stream_poll_ep_t, max)
+
+	num = C.ucp_stream_worker_poll(w.worker, &pollElems[0], C.ulong(max), 0)
+	if num < 0 {
+		return nil, newUcxError(C.ucs_status_t(num))
+	}
+
+	result := (*[1 << 28]UcpPollElem)(unsafe.Pointer(&pollElems[0]))[:num:num]
+	return result, nil
+}

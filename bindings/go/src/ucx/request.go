@@ -15,6 +15,7 @@ import (
 type UcpRequest struct {
 	request unsafe.Pointer
 	Status  UcsStatus
+	info	interface{}
 }
 
 type UcpRequestParams struct {
@@ -22,6 +23,7 @@ type UcpRequestParams struct {
 	memType    UcsMemoryType
 	Cb         UcpCallback
 	multi	   bool
+	waitall    bool
 	Memory	   *UcpMemory
 }
 
@@ -33,6 +35,11 @@ func (p *UcpRequestParams) SetMemType(memType UcsMemoryType) *UcpRequestParams {
 
 func (p *UcpRequestParams) SetMulti() *UcpRequestParams {
 	p.multi = true
+	return p
+}
+
+func (p *UcpRequestParams) SetWaitAll() *UcpRequestParams {
+	p.waitall = true
 	return p
 }
 
@@ -74,6 +81,11 @@ func packParams(params *UcpRequestParams, p *C.ucp_request_param_t, cb unsafe.Po
 		p.memh = params.Memory.memHandle
 	}
 
+	if params.waitall {
+		p.op_attr_mask |= C.UCP_OP_ATTR_FIELD_FLAGS
+		p.flags = C.UCP_STREAM_RECV_FLAG_WAITALL
+	}
+
 	return cbId
 }
 
@@ -104,6 +116,7 @@ func NewRequest(request C.ucs_status_ptr_t, callbackId uint64, immidiateInfo int
 		if ucpRequest.Status != UCS_OK {
 			return ucpRequest, NewUcxError(ucpRequest.Status)
 		}
+		ucpRequest.info = immidiateInfo
 	}
 
 	return ucpRequest, nil
@@ -117,6 +130,28 @@ func (r *UcpRequest) GetStatus() UcsStatus {
 		return r.Status
 	}
 	return UcsStatus(C.ucp_request_check_status(r.request))
+}
+
+// This routine check state of stream receive request and return status and number
+// of bytes received so far.
+func (r *UcpRequest) RecvStreamTest() (bool, uint64, error) {
+	if r.Status == UCS_OK {
+		return true, uint64(r.info.(C.size_t)), nil
+	}
+
+	if r.Status != UCS_INPROGRESS {
+		return false, 0, NewUcxError(r.Status)
+	}
+
+	var rlength C.size_t
+	status := C.ucp_stream_recv_request_test(r.request, &rlength)
+	if status == C.UCS_OK {
+		return true, uint64(rlength), nil
+	}
+	if status == C.UCS_INPROGRESS {
+		return false, 0, nil
+	}
+	return false, 0, newUcxError(status)
 }
 
 // This routine releases the non-blocking request back to the library, regardless
