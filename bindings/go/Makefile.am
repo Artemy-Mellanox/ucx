@@ -55,13 +55,22 @@ run-perftest: goperftest
 	cd $(abs_top_srcdir)/bindings/go/src/examples/perftest ;\
 	LD_LIBRARY_PATH=$(UCX_SOPATH):${LD_LIBRARY_PATH} ${GOTMPDIR}/goperftest ${ARGS}
 
-install-exec-hook: goperftest
+gominiotest: $(GOTMPDIR)
+	cd $(abs_top_srcdir)/bindings/go/src/examples/miniotest ;\
+	$(GO) mod tidy ;\
+	$(GO) build --tags=$(GOTAGS) -o ${GOTMPDIR}/gominiotest
+
+run-miniotest: gominiotest
+	LD_LIBRARY_PATH=$(UCX_SOPATH):${LD_LIBRARY_PATH} ${GOTMPDIR}/gominiotest ${ARGS}
+
+install-exec-hook: goperftest gominiotest
 	$(INSTALL) ${GOTMPDIR}/goperftest $(DESTDIR)$(bindir)
+	$(INSTALL) ${GOTMPDIR}/gominiotest $(DESTDIR)$(bindir)
 
 uninstall-hook:
 	$(RM) $(DESTDIR)$(bindir)/goperftest
 
-all: goperftest build
+all: goperftest gominiotest build
 
 .PHONY: all build run_perftest test bench
 
