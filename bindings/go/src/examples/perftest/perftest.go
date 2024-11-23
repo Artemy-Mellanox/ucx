@@ -28,12 +28,14 @@ type ProgressMode int
 const (
 	Callback ProgressMode = iota
 	Broadcast
+	Window
 )
 
 func (pm ProgressMode) String() string {
 	switch pm {
 	case Callback: return "callback"
 	case Broadcast: return "broadcast"
+	case Window: return "window"
 	default: return ""
 	}
 }
@@ -42,6 +44,7 @@ func (pm *ProgressMode) Set (value string) error {
 	switch strings.ToLower(value) {
 	case "callback", "cb": *pm = Callback
 	case "broadcast", "bc": *pm = Broadcast
+	case "window", "w": *pm = Window
 	default: return fmt.Errorf("unknown progress mode %s", value)
 	}
 	return nil
@@ -73,6 +76,7 @@ type PerfTest struct {
 	wake                 []chan struct{}
 	runProgress          int32
 	statReport           int
+	outstanding	     int32
 }
 
 const (
@@ -393,6 +397,11 @@ func clientThreadDoIter(t uint) {
 		requestParams.SetCallback(func(request *UcpRequest, status UcsStatus){
 			perfTest.wake[t] <- struct{}{}
 		})
+	} else if perfTestParams.progressMode == Window {
+		requestParams.SetCallback(func(request *UcpRequest, status UcsStatus){
+			atomic.AddInt32(&perfTest.outstanding, -1)
+			request.Close()
+		})
 	}
 
 	header := unsafe.Pointer(&t)
@@ -401,12 +410,17 @@ func clientThreadDoIter(t uint) {
 		panic(err)
 	}
 
-	if perfTestParams.progressMode == Callback {
-		<-perfTest.wake[t]
-	} else {
+	atomic.AddInt32(&perfTest.numCompletedRequests, 1)
+
+	switch perfTestParams.progressMode {
+	case Callback: <-perfTest.wake[t]
+	case Broadcast:
 		for request.GetStatus() == UCS_INPROGRESS {
 			<-perfTest.wake[t]
 		}
+	case Window:
+		atomic.AddInt32(&perfTest.outstanding, 1)
+		return
 	}
 
 	if request.GetStatus() != UCS_OK {
@@ -414,8 +428,6 @@ func clientThreadDoIter(t uint) {
 		panic(errorString)
 	}
 	request.Close()
-
-	atomic.AddInt32(&perfTest.numCompletedRequests, 1)
 	perfTest.wg.Done()
 }
 
@@ -468,7 +480,9 @@ func clientStart() error {
 	}
 
 	atomic.StoreInt32(&perfTest.runProgress, 1)
-	go progressThread()
+	if perfTestParams.progressMode != Window {
+		go progressThread()
+	}
 	for perfTest.messageSize = min; perfTest.messageSize <= max; perfTest.messageSize = nextSize(perfTest.messageSize, step) {
 		perfTest.numCompletedRequests = -warmUpIter
 		statCmd(STAT_CMD_PAUSE)
@@ -477,17 +491,29 @@ func clientStart() error {
 				start = time.Now()
 				statCmd(STAT_CMD_RESET)
 			}
-			perfTest.wg.Add(int(perfTestParams.numThreads))
-			for t := uint(0); t < perfTestParams.numThreads; t += 1 {
-				go clientThreadDoIter(t)
+			if perfTestParams.progressMode == Window {
+				for atomic.LoadInt32(&perfTest.outstanding) == int32(perfTestParams.numThreads) {
+					progressWorker()
+				}
+				clientThreadDoIter(0)
+			} else {
+				perfTest.wg.Add(int(perfTestParams.numThreads))
+				for t := uint(0); t < perfTestParams.numThreads; t += 1 {
+					go clientThreadDoIter(t)
+				}
+				perfTest.wg.Wait()
 			}
-			perfTest.wg.Wait()
 		}
 		printTotalStatistics(time.Since(start))
 	}
 	atomic.StoreInt32(&perfTest.runProgress, 0)
 	statCmd(STAT_CMD_STOP)
 
+	if perfTestParams.progressMode == Window {
+		for atomic.LoadInt32(&perfTest.outstanding) > 0 {
+			progressWorker()
+		}
+	}
 	closeAll()
 	return nil
 }

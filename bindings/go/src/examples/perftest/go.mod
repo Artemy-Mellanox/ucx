@@ -1,5 +1,7 @@
 module github.com/openucx/ucx/bindings/go/examples/perftest
 
+go 1.23.2
+
 require (
 	github.com/docker/go-units v0.5.0
 	github.com/openucx/ucx/bindings/go/src/cuda v0.0.0-00010101000000-000000000000
