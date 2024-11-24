@@ -4,6 +4,8 @@
  */
 package main
 
+// #include "perftest.h"
+import "C"
 import (
 	"errors"
 	"flag"
@@ -29,6 +31,7 @@ const (
 	Callback ProgressMode = iota
 	Broadcast
 	Window
+	C
 )
 
 func (pm ProgressMode) String() string {
@@ -36,6 +39,7 @@ func (pm ProgressMode) String() string {
 	case Callback: return "callback"
 	case Broadcast: return "broadcast"
 	case Window: return "window"
+	case C: return "c"
 	default: return ""
 	}
 }
@@ -45,6 +49,7 @@ func (pm *ProgressMode) Set (value string) error {
 	case "callback", "cb": *pm = Callback
 	case "broadcast", "bc": *pm = Broadcast
 	case "window", "w": *pm = Window
+	case "c": *pm = C
 	default: return fmt.Errorf("unknown progress mode %s", value)
 	}
 	return nil
@@ -374,14 +379,24 @@ func serverStart() error {
 	}
 
 	initWorker()
-	perfTest.worker.SetAmRecvHandler(0, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
+	if perfTestParams.progressMode != C {
+		perfTest.worker.SetAmRecvHandler(0, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
+	}
 	if err := initListener(); err != nil {
 		return err
 	}
 
 	tryCudaSetDevice()
-	for {
-		progressWorker()
+	if perfTestParams.progressMode == C {
+		var ctx C.perfCtx
+		ctx.addr = getAddressOffsetForThread(0);
+		ctx.worker = C.ucp_worker_h(perfTest.worker.RawPtr())
+		ctx.messageSize = C.uint64_t(perfTest.messageSize)
+		C.serverRun(&ctx)
+	} else {
+		for {
+			progressWorker()
+		}
 	}
 
 	flush()
@@ -480,12 +495,26 @@ func clientStart() error {
 	}
 
 	atomic.StoreInt32(&perfTest.runProgress, 1)
-	if perfTestParams.progressMode != Window {
+	if perfTestParams.progressMode != Window && perfTestParams.progressMode != C {
 		go progressThread()
 	}
 	for perfTest.messageSize = min; perfTest.messageSize <= max; perfTest.messageSize = nextSize(perfTest.messageSize, step) {
 		perfTest.numCompletedRequests = -warmUpIter
 		statCmd(STAT_CMD_PAUSE)
+		if perfTestParams.progressMode == C {
+			var ctx C.perfCtx
+			ctx.numIterations = C.int(numIterations)
+			ctx.messageSize = C.uint64_t(perfTest.messageSize)
+			ctx.ep = C.ucp_ep_h(perfTest.ep.RawPtr())
+			ctx.addr = getAddressOffsetForThread(0);
+			ctx.worker = C.ucp_worker_h(perfTest.worker.RawPtr())
+			ctx.window = C.int(perfTestParams.numThreads)
+			ctx.warmup = C.int(perfTestParams.warmUpIter)
+			start = time.UnixMicro(int64(C.clientRun(&ctx)))
+			perfTest.numCompletedRequests = numIterations
+			printTotalStatistics(time.Since(start))
+			continue;
+		}
 		for perfTest.numCompletedRequests != numIterations {
 			if perfTest.numCompletedRequests == 0 {
 				start = time.Now()
