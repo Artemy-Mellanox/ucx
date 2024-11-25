@@ -17,7 +17,8 @@ int64_t clientRun(perfCtx *ctx) {
     unsigned long t = 0;
     int i;
 
-    amParam.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA | UCP_OP_ATTR_FLAG_MULTI_SEND;
+    amParam.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA | UCP_OP_ATTR_FLAG_MULTI_SEND | UCP_OP_ATTR_FIELD_MEMH;
+    amParam.memh = ctx->mem;
     amParam.user_data = ctx;
     amParam.cb.send = &clientCb;
 
@@ -50,7 +51,8 @@ ucs_status_t serverCb(void *arg, const void *header, size_t header_length,
     ucs_status_ptr_t sp;
     perfCtx *ctx = arg;
 
-    amParam.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL | UCP_OP_ATTR_FLAG_MULTI_SEND;
+    amParam.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL | UCP_OP_ATTR_FLAG_MULTI_SEND | UCP_OP_ATTR_FIELD_MEMH;
+    amParam.memh = ctx->mem;
 
     if (param->recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV) {
         sp = ucp_am_recv_data_nbx(ctx->worker, data, ctx->addr, ctx->messageSize, &amParam);
