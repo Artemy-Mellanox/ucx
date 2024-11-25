@@ -363,7 +363,7 @@ func serverAmRecvHandler(header unsafe.Pointer, headerSize uint64, data *UcpAmDa
 	tid := *(*uint)(header)
 	if !data.IsDataValid() {
 		request, _ := data.Receive(getAddressOffsetForThread(tid), perfTest.messageSize,
-			     (&UcpRequestParams{}).SetMemType(perfTestParams.memType))
+			      (&UcpRequestParams{}).SetMemType(perfTestParams.memType).SetMulti().SetMemory(perfTest.memory))
 		request.Close()
 	}
 	atomic.AddInt32(&perfTest.numCompletedRequests, 1)
@@ -392,6 +392,7 @@ func serverStart() error {
 		ctx.addr = getAddressOffsetForThread(0);
 		ctx.worker = C.ucp_worker_h(perfTest.worker.RawPtr())
 		ctx.messageSize = C.uint64_t(perfTest.messageSize)
+		ctx.mem = C.ucp_mem_h(perfTest.memory.RawPtr())
 		C.serverRun(&ctx)
 	} else {
 		for {
@@ -408,6 +409,7 @@ func clientThreadDoIter(t uint) {
 	tryCudaSetDevice()
 
 	requestParams := (&UcpRequestParams{}).SetMemType(perfTestParams.memType)
+	requestParams.SetMulti().SetMemory(perfTest.memory)
 	if perfTestParams.progressMode == Callback {
 		requestParams.SetCallback(func(request *UcpRequest, status UcsStatus){
 			perfTest.wake[t] <- struct{}{}
@@ -510,6 +512,7 @@ func clientStart() error {
 			ctx.worker = C.ucp_worker_h(perfTest.worker.RawPtr())
 			ctx.window = C.int(perfTestParams.numThreads)
 			ctx.warmup = C.int(perfTestParams.warmUpIter)
+			ctx.mem = C.ucp_mem_h(perfTest.memory.RawPtr())
 			start = time.UnixMicro(int64(C.clientRun(&ctx)))
 			perfTest.numCompletedRequests = numIterations
 			printTotalStatistics(time.Since(start))

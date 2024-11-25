@@ -14,6 +14,7 @@ typedef struct {
     ucp_worker_h worker;
     ucp_ep_h ep;
     void *addr;
+    ucp_mem_h mem;
 
     int numOutstandingRequests;
     int numCompletedRequests;
