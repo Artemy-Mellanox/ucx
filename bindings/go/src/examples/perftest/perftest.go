@@ -55,6 +55,33 @@ func (pm *ProgressMode) Set (value string) error {
 	return nil
 }
 
+type TestType int
+
+const (
+	Am TestType = iota
+	Stream
+	StreamAll
+)
+
+func (tt TestType) String() string {
+	switch tt {
+	case Am: return "am"
+	case Stream: return "stream"
+	case StreamAll: return "stream-all"
+	default: return ""
+	}
+}
+
+func (tt *TestType) Set (value string) error {
+	switch strings.ToLower(value) {
+	case "am": *tt = Am
+	case "stream": *tt = Stream
+	case "stream-all": *tt = StreamAll
+	default: return fmt.Errorf("unknown test type %s", value)
+	}
+	return nil
+}
+
 type PerfTestParams struct {
 	messageSizes  string
 	memType       UcsMemoryType
@@ -66,7 +93,14 @@ type PerfTestParams struct {
 	printInterval float64
 	warmUpIter    uint
 	progressMode  ProgressMode
+	testType      TestType
 }
+
+const (
+	Progress = iota
+	Start
+	Quit
+)
 
 type PerfTest struct {
 	context              *UcpContext
@@ -78,7 +112,7 @@ type PerfTest struct {
 	messageSize          uint64
 	numCompletedRequests int32
 	wg                   sync.WaitGroup
-	wake                 []chan struct{}
+	wake                 []chan int
 	runProgress          int32
 	statReport           int
 	outstanding	     int32
@@ -99,10 +133,14 @@ var perfTestParams = PerfTestParams{}
 var perfTest = PerfTest{}
 
 // Returns address of current thread memory slice.
-func getAddressOffsetForThread(t uint) unsafe.Pointer {
+func getAddressOffsetForThreadWithOffset(t uint, off uint64) unsafe.Pointer {
 	var baseAddress uint = uint(uintptr(perfTest.memParams.Address))
-	var offset uint = baseAddress + t*uint(perfTest.messageSize)
+	var offset uint = baseAddress + t*uint(perfTest.messageSize) + uint(off)
 	return unsafe.Pointer(uintptr(offset))
+}
+
+func getAddressOffsetForThread(t uint) unsafe.Pointer {
+	return getAddressOffsetForThreadWithOffset(t, 0)
 }
 
 // Printing functions
@@ -198,7 +236,7 @@ func parseSizes(input string) (uint64, uint64, uint64) {
 }
 
 func initContext() {
-	params := (&UcpParams{}).EnableAM()
+	params := (&UcpParams{}).EnableAM().EnableStream()
 
 	if perfTestParams.wakeup {
 		params.EnableWakeup()
@@ -294,6 +332,15 @@ func clientConnectWorker() error {
 	return flush()
 }
 
+func wakeThreads(e int) {
+	for _, ch := range perfTest.wake {
+		select {
+		case ch <- e:
+		default:
+		}
+	}
+}
+
 func initListener() error {
 	var err error
 	listenerParams := &UcpListenerParams{}
@@ -305,6 +352,7 @@ func initListener() error {
 			(&UcpEpParams{}).SetConnRequest(connRequest).SetErrorHandler(epErrorHandling).SetPeerErrorHandling())
 
 		fmt.Printf("Got connection. Starting benchmark...\n")
+		wakeThreads(Start)
 	})
 
 	perfTest.listener, err = perfTest.worker.NewListener(listenerParams)
@@ -316,8 +364,7 @@ func initListener() error {
 }
 
 func progressWorker() {
-	for perfTest.worker.Progress() == 0 {
-	}
+	for perfTest.worker.Progress() == 0 { }
 	if perfTestParams.wakeup {
 		perfTest.worker.Wait()
 	}
@@ -327,12 +374,7 @@ func progressThread() {
 	for atomic.LoadInt32(&perfTest.runProgress) == 1 {
 		progressWorker()
 		if perfTestParams.progressMode == Broadcast {
-			for _, ch := range perfTest.wake {
-				select {
-				case ch <- struct{}{}:
-				default:
-				}
-			}
+			wakeThreads(Progress)
 		}
 	}
 }
@@ -363,11 +405,90 @@ func serverAmRecvHandler(header unsafe.Pointer, headerSize uint64, data *UcpAmDa
 	tid := *(*uint)(header)
 	if !data.IsDataValid() {
 		request, _ := data.Receive(getAddressOffsetForThread(tid), perfTest.messageSize,
-			      (&UcpRequestParams{}).SetMemType(perfTestParams.memType).SetMulti().SetMemory(perfTest.memory))
+			     (&UcpRequestParams{}).SetMemType(perfTestParams.memType).SetMulti().SetMemory(perfTest.memory))
 		request.Close()
 	}
 	atomic.AddInt32(&perfTest.numCompletedRequests, 1)
 	return UCS_OK
+}
+
+func serverPollStream(t uint) error {
+	for perfTest.ep == nil {
+		<-perfTest.wake[t]
+	}
+	tryCudaSetDevice()
+	requestParams := (&UcpRequestParams{}).SetMemType(perfTestParams.memType).SetWaitAll()
+
+	for {
+		off := uint64(0)
+		for {
+			request, err := perfTest.ep.RecvStreamNonBlocking(int(t), getAddressOffsetForThreadWithOffset(t, off), perfTest.messageSize - off, requestParams)
+			if err != nil {
+				panic(err)
+			}
+			for {
+				done, length, err := request.RecvStreamTest()
+				if err != nil {
+					panic(err)
+				}
+				if done {
+					off += length
+					break
+				}
+				e := <-perfTest.wake[t]
+				if e == Quit {
+					perfTest.wg.Done()
+					return nil
+				}
+			}
+			request.Close()
+
+			if off == perfTest.messageSize {
+				break
+			}
+
+			if off > perfTest.messageSize {
+				panic(fmt.Sprintf("%d %d", off, perfTest.messageSize))
+			}
+
+		}
+		atomic.AddInt32(&perfTest.numCompletedRequests, 1)
+	}
+	return nil
+}
+
+func serverPollAllStreams() {
+	for perfTest.ep == nil {
+		progressWorker()
+	}
+	tryCudaSetDevice()
+	reqs := make([]*UcpRequest, perfTestParams.numThreads)
+	requestParams := (&UcpRequestParams{}).SetMemType(perfTestParams.memType).SetWaitAll()
+	var err error
+	for id := range reqs {
+		reqs[id], err = perfTest.ep.RecvStreamNonBlocking(id, getAddressOffsetForThread(uint(id)), perfTest.messageSize, requestParams)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	for atomic.LoadInt32(&perfTest.runProgress) == 1 {
+		for id, req := range reqs {
+			if req.GetStatus() == UCS_OK {
+				req.Close()
+				atomic.AddInt32(&perfTest.numCompletedRequests, 1)
+				reqs[id], err = perfTest.ep.RecvStreamNonBlocking(id, getAddressOffsetForThread(uint(id)), perfTest.messageSize, requestParams)
+				if err != nil {
+					panic(err)
+				}
+			}
+		}
+		progressWorker()
+	}
+
+	for _, req := range reqs {
+		req.Close()
+	}
 }
 
 func serverStart() error {
@@ -379,15 +500,12 @@ func serverStart() error {
 	}
 
 	initWorker()
-	if perfTestParams.progressMode != C {
-		perfTest.worker.SetAmRecvHandler(0, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
-	}
 	if err := initListener(); err != nil {
 		return err
 	}
 
-	tryCudaSetDevice()
 	if perfTestParams.progressMode == C {
+		tryCudaSetDevice()
 		var ctx C.perfCtx
 		ctx.addr = getAddressOffsetForThread(0);
 		ctx.worker = C.ucp_worker_h(perfTest.worker.RawPtr())
@@ -395,8 +513,19 @@ func serverStart() error {
 		ctx.mem = C.ucp_mem_h(perfTest.memory.RawPtr())
 		C.serverRun(&ctx)
 	} else {
-		for {
-			progressWorker()
+		atomic.StoreInt32(&perfTest.runProgress, 1)
+		if perfTestParams.testType == Am {
+			perfTest.worker.SetAmRecvHandler(0, UCP_AM_FLAG_WHOLE_MSG, serverAmRecvHandler)
+			tryCudaSetDevice()
+			progressThread()
+		} else if perfTestParams.testType == Stream {
+			for t := uint(0); t < perfTestParams.numThreads; t += 1 {
+				go serverPollStream(t)
+			}
+			progressThread()
+		} else if perfTestParams.testType == StreamAll {
+			tryCudaSetDevice()
+			serverPollAllStreams()
 		}
 	}
 
@@ -412,7 +541,7 @@ func clientThreadDoIter(t uint) {
 	requestParams.SetMulti().SetMemory(perfTest.memory)
 	if perfTestParams.progressMode == Callback {
 		requestParams.SetCallback(func(request *UcpRequest, status UcsStatus){
-			perfTest.wake[t] <- struct{}{}
+			perfTest.wake[t] <- Progress
 		})
 	} else if perfTestParams.progressMode == Window {
 		requestParams.SetCallback(func(request *UcpRequest, status UcsStatus){
@@ -422,7 +551,17 @@ func clientThreadDoIter(t uint) {
 	}
 
 	header := unsafe.Pointer(&t)
-	request, err := perfTest.ep.SendAmNonBlocking(0, header, uint64(unsafe.Sizeof(t)), getAddressOffsetForThread(t), perfTest.messageSize, 0, requestParams)
+
+	var (
+		request *UcpRequest
+		err error
+	)
+
+	if perfTestParams.testType == Am {
+		request, err = perfTest.ep.SendAmNonBlocking(0, header, uint64(unsafe.Sizeof(t)), getAddressOffsetForThread(t), perfTest.messageSize, 0, requestParams)
+	} else if perfTestParams.testType == Stream {
+		request, err = perfTest.ep.SendStreamNonBlocking(int(t), getAddressOffsetForThread(t), perfTest.messageSize, requestParams)
+	}
 	if err != nil {
 		panic(err)
 	}
@@ -464,11 +603,6 @@ func clientStart() error {
 	initWorker()
 	if err := clientConnectWorker(); err != nil {
 		return err
-	}
-
-	perfTest.wake = make([]chan struct{}, perfTestParams.numThreads)
-	for i := range perfTest.wake {
-		perfTest.wake[i] = make(chan struct{}, perfTestParams.numThreads)
 	}
 
 	warmUpIter := align(perfTestParams.warmUpIter, perfTestParams.numThreads)
@@ -566,7 +700,15 @@ func main() {
 	perfTestParams.memType = UCS_MEMORY_TYPE_HOST
 	flag.Var(&perfTestParams.memType, "m", "memory type: host(default), cuda")
 
+	perfTestParams.testType = Am
+	flag.Var(&perfTestParams.testType, "T", "test type: am, stream")
+
 	flag.Parse()
+
+	perfTest.wake = make([]chan int, perfTestParams.numThreads)
+	for i := range perfTest.wake {
+		perfTest.wake[i] = make(chan int, 100)
+	}
 
 	var err error
 	if perfTestParams.ip == "" {
