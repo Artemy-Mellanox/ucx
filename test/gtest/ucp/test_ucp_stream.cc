@@ -1095,3 +1095,114 @@ UCS_TEST_P(test_ucp_stream_many2one, send_recv_nb_generic) {
 }
 
 UCP_INSTANTIATE_TEST_CASE(test_ucp_stream_many2one)
+
+
+class test_ucp_stream_rndv : public test_ucp_stream {
+public:
+    virtual void init() {
+        modify_config("RC_MLX5_TX_INLINE_RESP", "0", IGNORE_IF_NOT_EXIST);
+        modify_config("RNDV_SCHEME", "get_zcopy");
+        test_ucp_stream::init();
+        flush_worker(sender());
+    }
+
+    static bool req_has_work(void **req) {
+        if (*req == NULL) {
+            return 0;
+        }
+
+        if (ucp_request_check_status(*req) == UCS_INPROGRESS) {
+            return 1;
+        }
+
+        ucp_request_release(*req);
+        *req = NULL;
+        return 0;
+    }
+
+    static size_t chunk_size(size_t max, size_t min, size_t align, size_t pos,
+                             size_t total) {
+            return ucs_min(ucs_rand() % ((max - min) / align) * align + min,
+                           total - pos);
+    }
+};
+
+UCS_TEST_P(test_ucp_stream_rndv, send_recv) {
+    size_t step = 25000;
+    size_t iter = 1;
+    std::vector<uint8_t> src(10 * step), dst(10 * step);
+    std::vector<void *> reqs;
+    ucp_request_param_t send_param = {}, recv_param = {};
+    void *req;
+    size_t length, i;
+
+    recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;
+    recv_param.flags        = UCP_STREAM_RECV_FLAG_WAITALL;
+
+    req = ucp_stream_send_nbx(sender().ep(), &src[0], 10, &send_param);
+    reqs.push_back(req);
+
+    req = ucp_stream_recv_nbx(receiver().ep(), &dst[0], 10, &length,
+                              &recv_param);
+    reqs.push_back(req);
+    requests_wait(reqs);
+
+    for (i = 0; i < iter; ++i) {
+        req = ucp_stream_send_nbx(sender().ep(), &src[i * step], step,
+                                  &send_param);
+        reqs.push_back(req);
+    }
+
+    for (i = 0; i < iter * 2; ++i) {
+        req = ucp_stream_recv_nbx(receiver().ep(), &dst[i * step], step,
+                                  &length, &recv_param);
+        reqs.push_back(req);
+    }
+
+    for (i = iter; i < iter * 2; ++i) {
+        req = ucp_stream_send_nbx(sender().ep(), &src[i * step], step,
+                                  &send_param);
+        reqs.push_back(req);
+    }
+
+    requests_wait(reqs);
+}
+
+UCS_TEST_P(test_ucp_stream_rndv, rand) {
+    size_t total_size = 10000000, min_size = 100, max_size = 50000, align = 1;
+    std::vector<uint8_t> src(total_size), dst(total_size);
+    ucp_request_param_t send_param = {}, recv_param = {};
+    void *sreq = NULL, *rreq = NULL;
+    size_t rpos = 0, spos = 0;
+    size_t size, length;
+
+    ucs::fill_random(&src[0], total_size);
+
+    recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;
+    recv_param.flags        = UCP_STREAM_RECV_FLAG_WAITALL;
+
+    while ((spos < total_size) || (rpos < total_size) || req_has_work(&rreq) || req_has_work(&sreq)) {
+        while ((spos < total_size) && !req_has_work(&sreq)) {
+            size = chunk_size(max_size, min_size, align, spos, total_size);
+            sreq = ucp_stream_send_nbx(sender().ep(), &src[spos], size, &send_param);
+            spos += size;
+        }
+
+        while ((rpos < total_size) && !req_has_work(&rreq)) {
+            size = chunk_size(max_size, min_size, align, rpos, total_size);
+            rreq = ucp_stream_recv_nbx(receiver().ep(), &dst[rpos], size, &length, &recv_param);
+            rpos += size;
+        }
+
+        progress();
+    }
+
+    if (src != dst) {
+        auto diff = std::mismatch(src.begin(), src.end(), dst.begin());
+        printf("%s:%d %zd\n", __func__, __LINE__, std::distance(src.begin(), diff.first));
+    }
+
+    EXPECT_EQ(src, dst);
+}
+
+UCP_INSTANTIATE_TEST_CASE(test_ucp_stream_rndv)

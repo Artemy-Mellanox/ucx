@@ -1758,6 +1758,9 @@ UCS_PROFILE_FUNC(ucs_status_t, ucp_rndv_rts_handler,
 
     if (ucp_rndv_rts_is_am(rts_hdr)) {
         return ucp_am_rndv_process_rts(arg, data, length, tl_flags);
+    } else if (ucp_rndv_rts_is_stream(rts_hdr)) {
+        return UCS_OK;
+        //return ucp_stream_rndv_process_rts(worker, data, length, tl_flags, UCP_OP_ID_RNDV_RECV);
     } else {
         ucs_assert(ucp_rndv_rts_is_tag(rts_hdr));
         return ucp_tag_rndv_process_rts(worker, rts_hdr, length, tl_flags);

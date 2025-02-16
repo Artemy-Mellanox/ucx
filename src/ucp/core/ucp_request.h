@@ -149,7 +149,10 @@ struct ucp_request {
             };
             ucp_datatype_t          datatype; /* Send type */
             size_t                  length; /* Total length, in bytes */
-            ucp_send_nbx_callback_t cb; /* Completion callback */
+            union {
+                ucp_send_nbx_callback_t cb; /* Completion callback */
+                ucp_stream_recv_nbx_callback_t recv_cb;     /* Receive completion callback */
+            };
             ucs_hlist_link_t        list; /* Element in the per-EP list of UCP
                                              flush/proto requests */
 
@@ -307,6 +310,11 @@ struct ucp_request {
                                     /* Element in queue for segmented RKEY ptr */
                                     ucs_queue_elem_t  queue_elem;
                                 } rkey_ptr;
+
+                                struct {
+                                    ucp_stream_t *s;
+                                    ucp_lane_index_t atp_lane;
+                                } stream;
                             };
                         };
                     };
@@ -364,6 +372,13 @@ struct ucp_request {
                     void              *rndv_op;  /* Handler of issued rndv send. Need to cancel
                                                     the operation if it is completed by SW. */
                 } tag_offload;
+
+                struct {
+                    size_t                         elem_size;
+                    ucp_stream_t                   *s;
+                    ucs_queue_elem_t               queue;
+                    unsigned                       pending;
+                } stream;
 
                 struct {
                     /* Remote request ID received from a peer */
@@ -447,6 +462,7 @@ struct ucp_request {
                     ucp_stream_recv_nbx_callback_t cb;     /* Completion callback */
                     size_t                         elem_size;
                     size_t                         length; /* Completion info to fill */
+                    uint64_t id;
                 } stream;
 
                  struct {

@@ -218,6 +218,10 @@ KHASH_TYPE(ucp_worker_discard_uct_ep_hash, uct_ep_h, ucp_request_t*);
 typedef khash_t(ucp_worker_discard_uct_ep_hash) ucp_worker_discard_uct_ep_hash_t;
 
 
+KHASH_TYPE(ucp_worker_stream_hash, ucp_stream_key_t, ucp_stream_t*);
+typedef khash_t(ucp_worker_stream_hash) ucp_worker_stream_hash_t;
+
+
 typedef struct ucp_worker_mpool_key {
     ucs_memory_type_t mem_type;  /* memory type of the buffer pool */
     ucs_sys_device_t  sys_dev;   /* identifier for the device,
@@ -301,7 +305,7 @@ typedef struct ucp_worker {
 
     void                             *user_data;          /* User-defined data */
     ucs_strided_alloc_t              ep_alloc;            /* Endpoint allocator */
-    ucs_list_link_t                  stream_ready_eps;    /* List of EPs with received stream data */
+    ucs_list_link_t                  streams_ready;       /* List of streams with received data */
     unsigned                         num_all_eps;         /* Number of all endpoints (except internal
                                                            * endpoints) */
     ucs_list_link_t                  all_eps;             /* List of all endpoints (except internal
@@ -340,6 +344,7 @@ typedef struct ucp_worker {
                                                              mapping */
     UCS_PTR_MAP_T(request)           request_map;         /* UCP requests key to
                                                              ptr mapping */
+    ucp_worker_stream_hash_t         stream_hash;
 
     ucp_ep_config_arr_t              ep_config; /* EP configurations storage */
 

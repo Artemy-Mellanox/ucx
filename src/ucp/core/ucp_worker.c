@@ -2467,11 +2467,12 @@ ucs_status_t ucp_worker_create(ucp_context_h context,
     ucp_worker_keepalive_reset(worker);
     ucs_queue_head_init(&worker->rkey_ptr_reqs);
     ucs_list_head_init(&worker->arm_ifaces);
-    ucs_list_head_init(&worker->stream_ready_eps);
+    ucs_list_head_init(&worker->streams_ready);
     ucs_list_head_init(&worker->all_eps);
     ucs_list_head_init(&worker->internal_eps);
     kh_init_inplace(ucp_worker_rkey_config, &worker->rkey_config_hash);
     kh_init_inplace(ucp_worker_discard_uct_ep_hash, &worker->discard_uct_ep_hash);
+    kh_init_inplace(ucp_worker_stream_hash, &worker->stream_hash);
     worker->counters.ep_creations         = 0;
     worker->counters.ep_creation_failures = 0;
     worker->counters.ep_closures          = 0;
@@ -2679,6 +2680,7 @@ err_destroy_ep_map:
     UCS_PTR_MAP_DESTROY(ep, &worker->ep_map);
 err_free:
     ucs_strided_alloc_cleanup(&worker->ep_alloc);
+    kh_destroy_inplace(ucp_worker_stream_hash, &worker->stream_hash);
     kh_destroy_inplace(ucp_worker_discard_uct_ep_hash,
                        &worker->discard_uct_ep_hash);
     kh_destroy_inplace(ucp_worker_rkey_config, &worker->rkey_config_hash);
@@ -3040,18 +3042,20 @@ ssize_t ucp_stream_worker_poll(ucp_worker_h worker,
                                size_t max_eps, unsigned flags)
 {
     ssize_t count = 0;
-    ucp_ep_ext_t *ep_ext;
+    ucp_stream_t *stream;
 
     UCP_CONTEXT_CHECK_FEATURE_FLAGS(worker->context, UCP_FEATURE_STREAM,
                                     return UCS_ERR_INVALID_PARAM);
 
     UCP_WORKER_THREAD_CS_ENTER_CONDITIONAL(worker);
 
-    while ((count < max_eps) && !ucs_list_is_empty(&worker->stream_ready_eps)) {
-        ep_ext                    = ucp_stream_worker_dequeue_ep_head(worker);
-        poll_eps[count].ep        = ep_ext->ep;
-        poll_eps[count].user_data = ep_ext->user_data;
-        ++count;
+    while ((count < max_eps) && !ucs_list_is_empty(&worker->streams_ready)) {
+        stream = ucp_stream_worker_dequeue_head(worker);
+        if (stream->ep->flags & UCP_EP_FLAG_USED) {
+            poll_eps[count].ep        = stream->ep;
+            poll_eps[count].stream_id = stream->stream_id;
+            ++count;
+        }
     }
 
     UCP_WORKER_THREAD_CS_EXIT_CONDITIONAL(worker);

@@ -191,6 +191,11 @@ ucs_status_t ucp_proto_rndv_ats_complete(ucp_request_t *req);
 void ucp_proto_rndv_bulk_query(const ucp_proto_query_params_t *params,
                                ucp_proto_query_attr_t *attr);
 
+ucs_status_t
+ucp_proto_rndv_send_reply(ucp_worker_h worker, ucp_request_t *req,
+                          ucp_operation_id_t op_id, uint32_t op_attr_mask,
+                          size_t length, const void *rkey_buffer,
+                          size_t rkey_length, uint8_t sg_count);
 
 void ucp_proto_rndv_receive_start(ucp_worker_h worker, ucp_request_t *recv_req,
                                   const ucp_rndv_rts_hdr_t *rts,

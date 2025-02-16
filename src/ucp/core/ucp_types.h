@@ -78,6 +78,8 @@ typedef struct ucp_ep_config_key      ucp_ep_config_key_t;
 typedef struct ucp_rkey_config_key    ucp_rkey_config_key_t;
 typedef struct ucp_proto              ucp_proto_t;
 typedef struct ucp_mem_desc           ucp_mem_desc_t;
+typedef struct ucp_stream_key         ucp_stream_key_t;
+typedef struct ucp_stream             ucp_stream_t;
 
 
 /**
@@ -144,6 +146,7 @@ typedef enum {
     UCP_OP_ID_AM_SEND,
     UCP_OP_ID_AM_SEND_REPLY,
     UCP_OP_ID_STREAM_SEND,
+    UCP_OP_ID_STREAM_RECV,
     UCP_OP_ID_PUT,
     UCP_OP_ID_GET,
     UCP_OP_ID_AMO_POST,
@@ -201,6 +204,9 @@ typedef enum {
                                           defined AM */
     UCP_AM_ID_AM_SINGLE_REPLY   =  26, /* Single fragment user defined AM
                                           carrying remote ep for reply */
+    UCP_AM_ID_PMPY_RTR          =  27, /* Pushme-pullyou controll message */
+    UCP_AM_ID_PMPY_RTS          =  28, /* Pushme-pullyou controll message */
+    UCP_AM_ID_PMPY_ACK          =  29, /* Pushme-pullyou controll message */
     UCP_AM_ID_LAST
 } ucp_am_id_t;
 

@@ -152,6 +152,7 @@ libucp_la_SOURCES = \
 	rndv/rndv.c \
 	stream/stream_multi.c \
 	stream/stream_recv.c \
+	stream/stream_rndv.c \
 	stream/stream_send.c \
 	tag/eager_multi.c \
 	tag/eager_rcv.c \

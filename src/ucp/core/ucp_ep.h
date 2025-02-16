@@ -98,7 +98,7 @@ enum {
     UCP_EP_FLAG_CONNECT_REQ_QUEUED     = UCS_BIT(2), /* Connection request was queued */
     UCP_EP_FLAG_FAILED                 = UCS_BIT(3), /* EP is in failed state */
     UCP_EP_FLAG_USED                   = UCS_BIT(4), /* EP is in use by the user */
-    UCP_EP_FLAG_STREAM_HAS_DATA        = UCS_BIT(5), /* EP has data in the ext.stream.match_q */
+    //UCP_EP_FLAG_STREAM_HAS_DATA        = UCS_BIT(5), /* EP has data in the ext.stream.match_q */
     UCP_EP_FLAG_ON_MATCH_CTX           = UCS_BIT(6), /* EP is on match queue */
     UCP_EP_FLAG_REMOTE_ID              = UCS_BIT(7), /* remote ID is valid */
     UCP_EP_FLAG_BLOCK_FLUSH            = UCS_BIT(8), /* Flush ops have to be blocking
@@ -532,12 +532,6 @@ typedef struct ucp_ep_ext {
         ucp_ep_match_elem_t       ep_match;      /* Matching with remote endpoints */
         ucp_ep_flush_state_t      flush_state;   /* Remote completion status */
     };
-
-    struct {
-        ucs_list_link_t           ready_list;     /* List entry in worker's EP list */
-        ucs_queue_head_t          match_q;        /* Queue of receive data or requests,
-                                                     depends on UCP_EP_FLAG_STREAM_HAS_DATA */
-    } stream;
 
     struct {
         ucs_list_link_t           started_ams;

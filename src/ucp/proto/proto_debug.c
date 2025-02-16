@@ -13,6 +13,7 @@
 
 #include <ucp/am/ucp_am.inl>
 #include <ucp/rndv/proto_rndv.h>
+#include <ucp/stream/stream.h>
 #include <ucs/arch/atomic.h>
 #include <fnmatch.h>
 #include <ctype.h>
@@ -310,6 +311,12 @@ ucp_proto_select_is_am_op(const ucp_proto_select_param_t *select_param)
 }
 
 static int
+ucp_proto_select_is_stream_op(const ucp_proto_select_param_t *select_param)
+{
+    return ucp_proto_select_check_op(select_param, UCP_PROTO_STREAM_OP_ID_MASK);
+}
+
+static int
 ucp_proto_select_is_atomic_op(const ucp_proto_select_param_t *select_param)
 {
     return ucp_proto_select_check_op(select_param,
@@ -348,6 +355,9 @@ void ucp_proto_select_param_str(const ucp_proto_select_param_t *select_param,
         [ucs_ilog2(UCP_PROTO_SELECT_OP_FLAG_AM_EAGER)] = "egr",
         [ucs_ilog2(UCP_PROTO_SELECT_OP_FLAG_AM_RNDV)]  = "rndv"
     };
+    static const char *stream_flag_names[] = {
+        [ucs_ilog2(UCP_PROTO_SELECT_OP_FLAG_STREAM_ACTIVE)] = "active"
+    };
     uint32_t op_attr_mask, op_flags;
 
     ucs_string_buffer_appendf(
@@ -367,6 +377,9 @@ void ucp_proto_select_param_str(const ucp_proto_select_param_t *select_param,
                 ucs_string_buffer_append_flags(strb, op_flags, rndv_flag_names);
             } else if (ucp_proto_select_is_am_op(select_param)) {
                 ucs_string_buffer_append_flags(strb, op_flags, am_flag_names);
+            } else if (ucp_proto_select_is_stream_op(select_param)) {
+                ucs_string_buffer_append_flags(strb, op_flags,
+                                               stream_flag_names);
             }
         }
         ucs_string_buffer_rtrim(strb, ",");

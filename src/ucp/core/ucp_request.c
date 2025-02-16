@@ -195,7 +195,7 @@ ucs_status_t ucp_stream_recv_request_test(void *request, size_t *length_p)
 
     if (status != UCS_INPROGRESS) {
         ucs_assert(req->flags & UCP_REQUEST_FLAG_STREAM_RECV);
-        *length_p = req->recv.stream.length;
+        *length_p = req->send.state.dt_iter.offset;
     }
 
     return status;

@@ -36,7 +36,12 @@ ucp_stream_multi_common_probe(const ucp_proto_multi_init_params_t *params)
 static UCS_F_ALWAYS_INLINE void
 ucp_stream_set_hdr(ucp_request_t *req, ucp_stream_am_hdr_t *hdr)
 {
-    hdr->ep_id = ucp_send_request_get_ep_remote_id(req);
+    hdr->ep_id     = ucp_send_request_get_ep_remote_id(req);
+    if (req->flags & UCP_REQUEST_FLAG_SUPER_VALID) {
+        hdr->stream_id = req->send.rndv.stream.s->stream_id;
+    } else {
+        hdr->stream_id = req->send.stream.s->stream_id;
+    }
 }
 
 static size_t ucp_stream_bcopy_pack(void *dest, void *arg)
@@ -52,10 +57,17 @@ static UCS_F_ALWAYS_INLINE ucs_status_t ucp_stream_multi_bcopy_send_func(
         ucp_request_t *req, const ucp_proto_multi_lane_priv_t *lpriv,
         ucp_datatype_iter_t *next_iter, ucp_lane_index_t *lane_shift)
 {
-    return ucp_proto_am_bcopy_multi_common_send_func(
+    ucs_status_t status = ucp_proto_am_bcopy_multi_common_send_func(
             req, lpriv, next_iter, UCP_AM_ID_STREAM_DATA, ucp_stream_bcopy_pack,
             sizeof(ucp_stream_am_hdr_t), UCP_AM_ID_STREAM_DATA,
             ucp_stream_bcopy_pack, sizeof(ucp_stream_am_hdr_t));
+
+    return status;
+}
+
+void ucp_stream_multi_bcopy_init(ucp_request_t *req)
+{
+    req->send.stream.s->unexp_eager_count += req->send.state.dt_iter.length;
 }
 
 static ucs_status_t ucp_stream_multi_bcopy_progress(uct_pending_req_t *uct_req)
@@ -64,7 +76,7 @@ static ucs_status_t ucp_stream_multi_bcopy_progress(uct_pending_req_t *uct_req)
 
     /* coverity[tainted_data_downcast] */
     return ucp_proto_multi_bcopy_progress(
-            req, req->send.proto_config->priv, NULL,
+            req, req->send.proto_config->priv, ucp_stream_multi_bcopy_init,
             ucp_stream_multi_bcopy_send_func,
             ucp_proto_request_bcopy_complete_success);
 }

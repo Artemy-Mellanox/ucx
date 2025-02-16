@@ -39,6 +39,9 @@
 #define UCP_PROTO_SELECT_OP_FLAG_AM_RNDV  (UCP_PROTO_SELECT_OP_FLAGS_BASE << 2)
 
 
+#define UCP_PROTO_SELECT_OP_FLAG_STREAM_ACTIVE (UCP_PROTO_SELECT_OP_FLAGS_BASE << 1)
+
+
 /** Maximal length of ucp_proto_select_param_str() */
 #define UCP_PROTO_SELECT_PARAM_STR_MAX 128
 
