@@ -23,6 +23,7 @@ import (
 	. "github.com/openucx/ucx/bindings/go/src/cuda"
 	"runtime"
 	"github.com/docker/go-units"
+	"github.com/Artemy-Mellanox/go-dbg"
 )
 
 type ProgressMode int
@@ -31,6 +32,7 @@ const (
 	Callback ProgressMode = iota
 	Broadcast
 	Window
+	Threads
 	C
 )
 
@@ -40,6 +42,7 @@ func (pm ProgressMode) String() string {
 	case Broadcast: return "broadcast"
 	case Window: return "window"
 	case C: return "c"
+	case Threads: return "threads"
 	default: return ""
 	}
 }
@@ -50,6 +53,7 @@ func (pm *ProgressMode) Set (value string) error {
 	case "broadcast", "bc": *pm = Broadcast
 	case "window", "w": *pm = Window
 	case "c": *pm = C
+	case "threads", "t": *pm = Threads
 	default: return fmt.Errorf("unknown progress mode %s", value)
 	}
 	return nil
@@ -179,6 +183,7 @@ func printStatistics(statCmd chan int) {
 			}
 			last = curr
 		case cmd := <-statCmd:
+			dbg.Print("%d", cmd);
 			switch cmd {
 			case STAT_CMD_PAUSE:
 				ticker.Stop()
@@ -539,7 +544,12 @@ func clientThreadDoIter(t uint) {
 
 	requestParams := (&UcpRequestParams{}).SetMemType(perfTestParams.memType)
 	requestParams.SetMulti().SetMemory(perfTest.memory)
-	if perfTestParams.progressMode == Callback {
+	if perfTestParams.progressMode == Threads {
+		requestParams.SetCallback(func(request *UcpRequest, status UcsStatus){
+			perfTest.wake[t] <- Progress
+			request.Close()
+		})
+	} else if perfTestParams.progressMode == Callback {
 		requestParams.SetCallback(func(request *UcpRequest, status UcsStatus){
 			perfTest.wake[t] <- Progress
 		})
@@ -566,15 +576,18 @@ func clientThreadDoIter(t uint) {
 		panic(err)
 	}
 
-	atomic.AddInt32(&perfTest.numCompletedRequests, 1)
-
 	switch perfTestParams.progressMode {
+	case Threads: <-perfTest.wake[t]
+		return;
 	case Callback: <-perfTest.wake[t]
+		atomic.AddInt32(&perfTest.numCompletedRequests, 1)
 	case Broadcast:
 		for request.GetStatus() == UCS_INPROGRESS {
 			<-perfTest.wake[t]
 		}
+		atomic.AddInt32(&perfTest.numCompletedRequests, 1)
 	case Window:
+		atomic.AddInt32(&perfTest.numCompletedRequests, 1)
 		atomic.AddInt32(&perfTest.outstanding, 1)
 		return
 	}
@@ -625,7 +638,9 @@ func clientStart() error {
 	if perfTestParams.printInterval > 0 {
 		statCmdCh := make(chan int)
 		statCmd = func(cmd int) {
+			dbg.Print("%d", cmd);
 			statCmdCh <- cmd
+			dbg.Print("%d", cmd);
 		}
 		go printStatistics(statCmdCh)
 	}
@@ -651,6 +666,25 @@ func clientStart() error {
 			perfTest.numCompletedRequests = numIterations
 			printTotalStatistics(time.Since(start))
 			continue;
+		}
+		if perfTestParams.progressMode == Threads {
+			perfTest.wg.Add(int(perfTestParams.numThreads))
+			start = time.Now()
+			for t := uint(0); t < perfTestParams.numThreads; t += 1 {
+				go func() {
+					for atomic.LoadInt32(&perfTest.numCompletedRequests) < numIterations {
+						clientThreadDoIter(t);
+						if atomic.AddInt32(&perfTest.numCompletedRequests, 1) == 0 {
+							start = time.Now()
+							statCmd(STAT_CMD_RESET)
+						}
+					}
+					perfTest.wg.Done()
+				}()
+			}
+			perfTest.wg.Wait()
+			printTotalStatistics(time.Since(start))
+			continue
 		}
 		for perfTest.numCompletedRequests != numIterations {
 			if perfTest.numCompletedRequests == 0 {
