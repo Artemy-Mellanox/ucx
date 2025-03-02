@@ -168,11 +168,12 @@ func main() {
 		rand.Read(obj)
 		fileobj := bytes.NewReader(obj)
 
-		req, _ := http.NewRequest("PUT", "/data", fileobj)
+		url := fmt.Sprintf("http://%s/data", addr)
+		req, _ := http.NewRequest("PUT", url, fileobj)
 		req.Header.Set("Content-Length", strconv.FormatUint(object_size, 10))
 		dateHdr := time.Now().UTC().Format("20060102T150405Z")
 		req.Header.Set("X-Amz-Date", dateHdr)
-		t, _ := uhttp.NewTransport(addr)
+		t, _ := uhttp.NewTransport()
 		defer t.Close()
 		client := &http.Client{Transport: t}
 		resp, err := client.Do(req)
@@ -191,15 +192,17 @@ func main() {
 		}
 		fileobj := bytes.NewReader(obj)
 
-		t, _ := uhttp.NewTransport(addr)
+		t, _ := uhttp.NewTransport()
 		defer t.Close()
 		client := &http.Client{Transport: t}
 
-		resp, _ := client.Get("/")
+		url := fmt.Sprintf("http://%s/", addr)
+		resp, _ := client.Get(url)
 		defer resp.Body.Close()
 		_, _ = ioutil.ReadAll(resp.Body)
 
-		putReq, _ := http.NewRequest("PUT", "/data", fileobj)
+		url = fmt.Sprintf("http://%s/data", addr)
+		putReq, _ := http.NewRequest("PUT", url, fileobj)
 		putReq.Header.Set("Content-Length", strconv.FormatUint(object_size, 10))
 		dateHdr := time.Now().UTC().Format("20060102T150405Z")
 		putReq.Header.Set("X-Amz-Date", dateHdr)
@@ -210,7 +213,8 @@ func main() {
 		}
 		fmt.Printf("Upload status %s: resp: %+v\n", putResp.Status, putResp)
 
-		getReq, _ := http.NewRequest("GET", "/data", nil)
+		url = fmt.Sprintf("http://%s/data", addr)
+		getReq, _ := http.NewRequest("GET", url, nil)
 		getResp, err := client.Do(getReq)
 		defer getResp.Body.Close()
 		if err != nil {
@@ -224,7 +228,7 @@ func main() {
 	} else if doGet {
 		var t http.RoundTripper
 		if ucxMode {
-			t, _ = uhttp.NewTransport(addr)
+			t, _ = uhttp.NewTransport()
 		}
 		client := &http.Client{Transport: t}
 		resp, err := client.Get(fmt.Sprintf("http://%s/", addr))
@@ -248,7 +252,7 @@ func main() {
 	} else if doPerf {
 		var t http.RoundTripper
 		if ucxMode {
-			t, _ = uhttp.NewTransport(addr)
+			t, _ = uhttp.NewTransport()
 		}
 		client := &http.Client{Transport: t}
 
@@ -309,11 +313,12 @@ func main() {
 		}
 
 	} else {
-		t, _ := uhttp.NewTransport(addr)
+		t, _ := uhttp.NewTransport()
 		defer t.Close()
 		client := &http.Client{Transport: t}
 
-		resp, err := client.Get("/")
+		url := fmt.Sprintf("http://%s/", addr)
+		resp, err := client.Get(url)
 		fmt.Printf("%v %v\n", resp, err)
 		defer resp.Body.Close()
 		body, _ := ioutil.ReadAll(resp.Body)

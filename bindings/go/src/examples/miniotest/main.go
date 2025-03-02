@@ -28,7 +28,7 @@ func client(ucx bool, addr string) (*minio.Client, error) {
 		})
 	}
 
-	transport, err := http.NewTransport(addr)
+	transport, err := http.NewTransport()
 	if err != nil {
 		log.Fatalf("http.NewClient %v", err)
 	}

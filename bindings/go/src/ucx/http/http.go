@@ -72,12 +72,17 @@ type Server struct {
 	handler http.Handler
 }
 
+type reqKey struct {
+	host string
+	id int
+}
+
 type responseWriter struct {
 	ep       *ucx.UcpEp
 	headers  http.Header
 	status   int
 	wrote    chan struct{}
-	id	 int
+	key	 reqKey
 	headerSent bool
 }
 
@@ -97,7 +102,7 @@ func (w *responseWriter) Write(data []byte) (int, error) {
 	dataPtr, dataLen := getBuf(data)
 	reqParams := &ucx.UcpRequestParams{}
 	reqParams.SetCallback(w.onData)
-	if _, err := w.ep.SendStreamNonBlocking(w.id, dataPtr, dataLen, reqParams); err != nil {
+	if _, err := w.ep.SendStreamNonBlocking(w.key.id, dataPtr, dataLen, reqParams); err != nil {
 		return 0, err
 	}
 	<-w.wrote
@@ -109,7 +114,8 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 
 	headerMap := map[string]string{
 		"ucx-code": strconv.Itoa(w.status),
-		"ucx-id": strconv.Itoa(w.id),
+		"ucx-id": strconv.Itoa(w.key.id),
+		"ucx-host": w.key.host,
 	}
 
 	for k, v := range w.headers {
@@ -135,7 +141,7 @@ type dataReader struct {
 	ep *ucx.UcpEp
 	read chan int
 	left int
-	id int
+	key reqKey
 	onClose func()
 }
 
@@ -152,7 +158,7 @@ func (r *dataReader) Read(p []byte) (length int, res error) {
 		}
 		reqParams := &ucx.UcpRequestParams{}
 		reqParams.SetCallback(r.onData)
-		if _, res = r.ep.RecvStreamNonBlocking(r.id, dataPtr, dataLen, reqParams); res != nil {
+		if _, res = r.ep.RecvStreamNonBlocking(r.key.id, dataPtr, dataLen, reqParams); res != nil {
 			return 0, res
 		}
 		length = <-r.read
@@ -174,29 +180,33 @@ func (r *dataReader) Close() (error) {
 	return nil
 }
 
-func handleAm(header unsafe.Pointer, headerSize uint64, replyEp *ucx.UcpEp) (map[string]string, *dataReader, int64, int, error) {
+func handleAm(header unsafe.Pointer, headerSize uint64, replyEp *ucx.UcpEp) (map[string]string, *dataReader, int64, reqKey, error) {
 	var headerMap map[string]string
 	if headerSize > 0 {
 		headerBytes := ucx.GoBytes(header, headerSize)
 		if err := json.Unmarshal(headerBytes, &headerMap); err != nil {
-			return nil, nil, 0, 0, err
+			return nil, nil, 0, reqKey{}, err
 		}
 	}
 
 	length, _ := strconv.ParseInt(headerMap["Content-Length"], 10, 64)
-	reqId, _ := strconv.Atoi(headerMap["ucx-id"])
+	id, _ := strconv.Atoi(headerMap["ucx-id"])
+	key := reqKey{
+		id: id,
+		host: headerMap["ucx-host"],
+	}
 	r := &dataReader {
 		ep: replyEp,
 		left: int(length),
-		id: reqId,
+		key: key,
 		read: make(chan int, 1),
 	}
 
-	return headerMap, r, length, reqId, nil
+	return headerMap, r, length, key, nil
 }
 
 func (s *Server) handleRequest(header unsafe.Pointer, headerSize uint64, data *ucx.UcpAmData, replyEp *ucx.UcpEp) ucx.UcsStatus {
-	headerMap, reader, contentLength, reqId, err := handleAm(header, headerSize, replyEp)
+	headerMap, reader, contentLength, key, err := handleAm(header, headerSize, replyEp)
 	if err != nil {
 		fmt.Printf("request %v\n", err)
 		return ucx.UCS_ERR_IO_ERROR
@@ -213,7 +223,7 @@ func (s *Server) handleRequest(header unsafe.Pointer, headerSize uint64, data *u
 	writer := &responseWriter{
 		ep: replyEp,
 		headers: make(http.Header),
-		id: reqId,
+		key: key,
 		wrote: make(chan struct{}, 1),
 	}
 
@@ -302,76 +312,34 @@ type tracker struct {
 
 type Transport struct {
 	context
+	quit chan struct{}
+	reqs sync.Map
+	conns sync.Map
+}
+
+type connection struct {
 	ep *ucx.UcpEp
 	chPool chan int
-	reqs sync.Map
-	quit chan struct{}
 	mu sync.Mutex
+	host string
+	transport *Transport
 }
 
-func (a *Transport) handleResponse(header unsafe.Pointer, headerSize uint64, data *ucx.UcpAmData, replyEp *ucx.UcpEp) ucx.UcsStatus {
-	headerMap, reader, contentLength, reqId, err := handleAm(header, headerSize, replyEp)
-	if err != nil {
-		fmt.Printf("handleResponse %v\n", err)
-		return ucx.UCS_ERR_IO_ERROR
-	}
-
-	req, _ := a.reqs.Load(reqId)
-	tr := req.(*tracker)
-	if tr.noBody {
-		reader.left = 0
-	}
-
-	resp := &http.Response{
-		Header: make(http.Header),
-		Body: reader,
-		Status: headerMap["ucx-code"],
-	}
-
-	reader.onClose = func() {
-		a.donePending(tr, TR_PENDING_RECV, reqId)
-	}
-
-	statusCode, _, _ := strings.Cut(resp.Status, " ")
-	resp.StatusCode, _ = strconv.Atoi(statusCode)
-	resp.ContentLength = contentLength
-
-	for k, v := range headerMap {
-		resp.Header.Set(k,v)
-	}
-
-	tr.resp <- resp
-	return ucx.UCS_OK
+func (c *connection) Close() {
+	c.ep.CloseNonBlockingForce(nil)
 }
 
-func (a *Transport) Close() {
-	a.quit <- struct{}{}
-	a.ep.CloseNonBlockingForce(nil)
-	a.context.Close()
-}
-
-func (a *Transport) progress() {
-	for {
-		select {
-			case <-a.quit: return
-			default: a.Progress()
-		}
+func (t *Transport) newConnection(host string) (*connection, error) {
+	conn := &connection{
+		transport: t,
+		host: host,
 	}
-}
-
-func NewTransport(addr string) (*Transport, error) {
-	a := new(Transport)
-	a.Init()
-	a.quit = make(chan struct{})
-
-	a.chPool = make(chan int, 64)
-	for chId := 0; chId < 64; chId++ {
-		a.chPool <- chId
+	conn.chPool = make(chan int, 64)
+	for id := 0; id < 64; id++ {
+		conn.chPool <- id
 	}
 
-	a.worker.SetAmRecvHandler(AM_RESP, ucx.UCP_AM_FLAG_PERSISTENT_DATA, a.handleResponse)
-
-	tcp, err := net.ResolveTCPAddr("tcp", addr)
+	tcp, err := net.ResolveTCPAddr("tcp", host)
 	if err != nil {
 		return nil, err
 	}
@@ -379,44 +347,48 @@ func NewTransport(addr string) (*Transport, error) {
 	epParams := &ucx.UcpEpParams{}
 	epParams.SetSocketAddress(tcp)
 	epParams.SetErrorHandler(onErr)
-	ep, err := a.worker.NewEndpoint(epParams)
+	ep, err := t.worker.NewEndpoint(epParams)
 	if err != nil {
 		return nil, err
 	}
 
-	a.ep = ep
-	go a.progress()
-	return a, nil
+	conn.ep = ep
+	return conn, nil
 }
 
-func (a *Transport) getCh() (int) {
+func (c *connection) getCh() (int) {
 	select {
-	case chId := <-a.chPool: return chId
+	case id := <-c.chPool: return id
 	case <-time.After(time.Second): panic("getCh timeout")
 	}
 }
 
-func (a *Transport) putCh(chId int) {
-	a.chPool <- chId
+func (c *connection) putCh(id int) {
+	c.chPool <- id
 }
 
-func (a *Transport) donePending(tr *tracker, f int, reqId int) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+func (c *connection) donePending(tr *tracker, f int, reqId int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	tr.pending &= ^f
 	if tr.pending == 0 {
-		a.putCh(reqId)
-		a.reqs.Delete(reqId)
+		c.putCh(reqId)
+		c.transport.reqs.Delete(reqId)
 	}
 }
 
-func (a *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	reqId := a.getCh()
+func (c *connection) roundTrip(req *http.Request) (*http.Response, error) {
+	reqId := c.getCh()
+	key := reqKey {
+		host: c.host,
+		id: reqId,
+	}
 	headerMap := map[string]string{
 		"ucx-method": req.Method,
 		"ucx-url": req.URL.String(),
 		"ucx-id": strconv.Itoa(reqId),
+		"ucx-host": c.host,
 		"Content-Length": strconv.FormatInt(req.ContentLength, 10),
 	}
 
@@ -434,10 +406,10 @@ func (a *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		noBody: req.Method == http.MethodHead,
 		pending: TR_PENDING_RECV,
 	}
-	a.reqs.Store(reqId, tr)
+	c.transport.reqs.Store(key, tr)
 
 	headerPtr, headerLen := getBuf(header)
-	send, err := a.ep.SendAmNonBlocking(AM_REQ,
+	send, err := c.ep.SendAmNonBlocking(AM_REQ,
 		headerPtr, headerLen, nil, 0,
 		ucx.UCP_AM_SEND_FLAG_REPLY, nil)
 	if err != nil {
@@ -450,11 +422,11 @@ func (a *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		dataPtr, dataLen := getBuf(tr.data)
 		reqParams := &ucx.UcpRequestParams{}
 		reqParams.SetCallback(func (request *ucx.UcpRequest, status ucx.UcsStatus) {
-			a.donePending(tr, TR_PENDING_SEND, reqId)
+			c.donePending(tr, TR_PENDING_SEND, reqId)
 			request.Close()
 		})
 		tr.pending |= TR_PENDING_SEND
-		_, err := a.ep.SendStreamNonBlocking(reqId, dataPtr, dataLen, reqParams)
+		_, err := c.ep.SendStreamNonBlocking(reqId, dataPtr, dataLen, reqParams)
 		if err != nil {
 			return nil, err
 		}
@@ -464,10 +436,89 @@ func (a *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
+func NewTransport() (*Transport, error) {
+	t := new(Transport)
+	t.Init()
+	t.quit = make(chan struct{})
+	t.worker.SetAmRecvHandler(AM_RESP, ucx.UCP_AM_FLAG_PERSISTENT_DATA, t.handleResponse)
+	go t.progress()
+	return t, nil
+}
+
+func (t *Transport) progress() {
+	for {
+		select {
+			case <-t.quit: return
+			default: t.Progress()
+		}
+	}
+}
+
+func (t *Transport) handleResponse(header unsafe.Pointer, headerSize uint64, data *ucx.UcpAmData, replyEp *ucx.UcpEp) ucx.UcsStatus {
+	headerMap, reader, contentLength, key, err := handleAm(header, headerSize, replyEp)
+	if err != nil {
+		fmt.Printf("handleResponse %v\n", err)
+		return ucx.UCS_ERR_IO_ERROR
+	}
+
+	req, _ := t.reqs.Load(key)
+	c, _ := t.conns.Load(key.host)
+	conn := c.(*connection)
+
+	tr := req.(*tracker)
+	if tr.noBody {
+		reader.left = 0
+	}
+
+	resp := &http.Response{
+		Header: make(http.Header),
+		Body: reader,
+		Status: headerMap["ucx-code"],
+	}
+
+	reader.onClose = func() {
+		conn.donePending(tr, TR_PENDING_RECV, key.id)
+	}
+
+	statusCode, _, _ := strings.Cut(resp.Status, " ")
+	resp.StatusCode, _ = strconv.Atoi(statusCode)
+	resp.ContentLength = contentLength
+
+	for k, v := range headerMap {
+		resp.Header.Set(k,v)
+	}
+
+	tr.resp <- resp
+	return ucx.UCS_OK
+}
+
+func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	host := req.URL.Host
+	var conn *connection
+	c, has := t.conns.Load(host)
+	if has {
+		conn = c.(*connection)
+	} else {
+		var err error
+		conn, err = t.newConnection(host)
+		if err != nil {
+			return nil, err
+		}
+		t.conns.Store(host, conn)
+	}
+
+	return conn.roundTrip(req);
+}
+
+func (t *Transport) Close() {
+	t.quit <- struct{}{}
+	t.context.Close()
+}
+
 func Dump(o interface{}) string {
 	switch o := o.(type) {
 	case *dataReader:
-		return fmt.Sprintf("dataReader %d %d", o.left, o.id)
+		return fmt.Sprintf("dataReader %d %d", o.left, o.key.host, o.key.id)
 	}
 	return fmt.Sprintf("%T %v", o, o)
 }
