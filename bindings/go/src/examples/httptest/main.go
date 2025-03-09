@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -117,38 +118,59 @@ func sizes(input string) (uint64, uint64, uint64) {
 func main() {
 	var (
 		serverMode bool
-		doPut bool
-		doGet bool
-		doLoop bool
-		doPerf bool
-		doPerfHead bool
+		test string
 		addr string
 		object_size uint64 = 1<<30
 		ucxMode bool
 		window int
 		messageSizes string
 		volume uint64
+		profile string
 	)
 
 	flag := flag.NewFlagSet("myflag", flag.ExitOnError)
 	flag.BoolVar(&serverMode, "s", false, "Server");
-	flag.BoolVar(&doPut, "p", false, "PUT");
-	flag.BoolVar(&doGet, "g", false, "GET");
-	flag.BoolVar(&doLoop, "l", false, "PUT-GET");
+	flag.StringVar(&test, "t", "loop", "test type");
 	flag.IntVar(&window, "w", 1, "window");
-	flag.BoolVar(&doPerf, "P", false, "perf");
-	flag.BoolVar(&doPerfHead, "H", false, "perf HEAD");
 	flag.StringVar(&messageSizes, "m", "1073741824", "messages sizes");
 	flag.StringVar(&addr, "a", "2.1.3.34:13337", "Address");
 	flag.BoolVar(&ucxMode, "U", false, "use UCX");
 	flag.Uint64Var(&volume, "v", 1099511627776, "volume");
+	flag.StringVar(&profile, "P", "", "Profile directory");
 
 	if err := flag.Parse(os.Args[1:]); err != nil {
 		os.Exit(1)
 	}
 
+	if profile != "" {
+		var proto string
+		if ucxMode {
+			proto = "U"
+		} else {
+			proto = "H"
+		}
+		label := fmt.Sprintf("%s-%s-%d-%s", proto, test, window, messageSizes)
+
+		fc, err := os.Create(fmt.Sprintf("%s/gohttptest-%s.cpuprof", profile, label))
+		if err != nil {
+			panic(err)
+		}
+		defer fc.Close()
+		pprof.StartCPUProfile(fc)
+		defer pprof.StopCPUProfile()
+
+		defer func() {
+			fm, err := os.Create(fmt.Sprintf("%s/gohttptest-%s.memprof", profile, label))
+			if err != nil {
+				panic(err)
+			}
+			pprof.Lookup("allocs").WriteTo(fm, 0)
+			fm.Close()
+		}()
+	}
+
 	_, object_size, _ = sizes(messageSizes)
-	if serverMode {
+	if test == "srv" {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
@@ -185,7 +207,7 @@ func main() {
 				log.Fatalf("FATAL: StartServer: %v", err)
 			}
 		}
-	} else if doPut {
+	} else if test == "put" {
 		obj := make([]byte, object_size)
 		rand.Read(obj)
 		fileobj := bytes.NewReader(obj)
@@ -204,7 +226,7 @@ func main() {
 			log.Fatalf("FATAL: Error uploading: %v", err)
 		}
 		fmt.Printf("Upload status %s: resp: %+v\n", resp.Status, resp)
-	} else if doLoop {
+	} else if test == "loop" {
 		obj := make([]byte, object_size)
 		rand.Read(obj)
 		obj32 := *(*[]uint32)(unsafe.Pointer(&obj))
@@ -247,7 +269,7 @@ func main() {
 		if !bytes.Equal(obj, read.Bytes()) {
 			PrintHexComparison(obj, read.Bytes())
 		}
-	} else if doGet {
+	} else if test == "get" {
 		var t http.RoundTripper
 		if ucxMode {
 			t, _ = uhttp.NewTransport()
@@ -274,7 +296,7 @@ func main() {
 		resp, err = client.Get(fmt.Sprintf("http://%s/wrong", addr))
 		fmt.Printf("%v %v\n", resp, err)
 		resp.Body.Close()
-	} else if doPerf {
+	} else if test == "perf" {
 		var t http.RoundTripper
 		if ucxMode {
 			t, _ = uhttp.NewTransport()
@@ -336,7 +358,7 @@ func main() {
 			close(done)
 			fmt.Printf("%20d %20f\n", size, float64(total)/float64(time.Since(start).Seconds())*1e-6)
 		}
-	} else if doPerfHead {
+	} else if test == "head" {
 		var t http.RoundTripper
 		if ucxMode {
 			t, _ = uhttp.NewTransport()
@@ -395,4 +417,6 @@ func main() {
 		body, _ := ioutil.ReadAll(resp.Body)
 		fmt.Printf("%s\n", body)
 	}
+
+	
 }
