@@ -323,18 +323,25 @@ type connection struct {
 	mu sync.Mutex
 	host string
 	transport *Transport
+	err chan error
 }
 
 func (c *connection) Close() {
 	c.ep.CloseNonBlockingForce(nil)
 }
 
+func (c *connection) onError(ep *ucx.UcpEp, status ucx.UcsStatus) {
+	c.err <- ucx.NewUcxError(status)
+}
+
 func (t *Transport) newConnection(host string) (*connection, error) {
 	conn := &connection{
 		transport: t,
 		host: host,
+		err: make(chan error),
+		chPool: make(chan int, 64),
 	}
-	conn.chPool = make(chan int, 64)
+
 	for id := 0; id < 64; id++ {
 		conn.chPool <- id
 	}
@@ -346,7 +353,7 @@ func (t *Transport) newConnection(host string) (*connection, error) {
 
 	epParams := &ucx.UcpEpParams{}
 	epParams.SetSocketAddress(tcp)
-	epParams.SetErrorHandler(onErr)
+	epParams.SetErrorHandler(conn.onError)
 	ep, err := t.worker.NewEndpoint(epParams)
 	if err != nil {
 		return nil, err
@@ -432,8 +439,10 @@ func (c *connection) roundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	resp := <-tr.resp
-	return resp, nil
+	select {
+	case resp := <-tr.resp: return resp, nil
+	case err := <-c.err: return nil, err
+	}
 }
 
 func NewTransport() (*Transport, error) {
@@ -448,8 +457,8 @@ func NewTransport() (*Transport, error) {
 func (t *Transport) progress() {
 	for {
 		select {
-			case <-t.quit: return
-			default: t.Progress()
+		case <-t.quit: return
+		default: t.Progress()
 		}
 	}
 }
