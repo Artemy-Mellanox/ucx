@@ -122,6 +122,7 @@ type responseWriter struct {
 	wrote    chan struct{}
 	key	 reqKey
 	headerSent bool
+	length   int
 }
 
 func (w *responseWriter) Header() http.Header {
@@ -134,12 +135,14 @@ func (w *responseWriter) onData(request *ucx.UcpRequest, status ucx.UcsStatus) {
 }
 
 func (w *responseWriter) Write(data []byte) (int, error) {
-	if !w.headerSent {
-		w.WriteHeader(http.StatusOK)
-	}
 	dataPtr, dataLen := getBuf(data)
+	if !w.headerSent {
+		w.length = int(dataLen)
+		w.WriteHeader(w.status)
+	}
 	reqParams := &ucx.UcpRequestParams{}
 	reqParams.SetCallback(w.onData)
+	traceReq("id", w.key, "length", dataLen)
 	if _, err := w.ep.SendStreamNonBlocking(w.key.id, dataPtr, dataLen, reqParams); err != nil {
 		return 0, err
 	}
@@ -149,6 +152,14 @@ func (w *responseWriter) Write(data []byte) (int, error) {
 
 func (w *responseWriter) WriteHeader(statusCode int) {
 	w.status = statusCode
+
+	if _, hasLength := w.headers["Content-Length"]; !hasLength {
+		if w.length > 0 {
+			w.headers.Set("Content-Length", strconv.Itoa(w.length))
+		} else {
+			return;
+		}
+	}
 
 	headerMap := map[string]string{
 		"ucx-code": strconv.Itoa(w.status),
@@ -173,7 +184,7 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 		return
 	}
 	w.headerSent = true
-	traceReq("id", w.key, "status", statusCode)
+	traceReq("id", w.key, "status", statusCode, "length", w.headers.Get("Content-Length"))
 }
 
 type dataReader struct {
@@ -265,6 +276,7 @@ func (s *Server) handleRequest(header unsafe.Pointer, headerSize uint64, data *u
 		headers: make(http.Header),
 		key: key,
 		wrote: make(chan struct{}, 1),
+		status: http.StatusOK,
 	}
 	trace("url", req.URL, "id", key, "length", contentLength)
 
@@ -527,7 +539,6 @@ func (t *Transport) handleResponse(header unsafe.Pointer, headerSize uint64, dat
 		reader.left = 0
 	}
 
-	traceReq("host", key.host, "id", key.id, "status", headerMap["ucx-code"])
 	resp := &http.Response{
 		Header: make(http.Header),
 		Body: reader,
@@ -541,6 +552,7 @@ func (t *Transport) handleResponse(header unsafe.Pointer, headerSize uint64, dat
 	statusCode, _, _ := strings.Cut(resp.Status, " ")
 	resp.StatusCode, _ = strconv.Atoi(statusCode)
 	resp.ContentLength = contentLength
+	traceReq("host", key.host, "id", key.id, "status", headerMap["ucx-code"], "length", contentLength, "left", reader.left)
 
 	for k, v := range headerMap {
 		resp.Header.Set(k,v)
