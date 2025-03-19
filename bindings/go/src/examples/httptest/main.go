@@ -33,6 +33,9 @@ var globalData []byte
 
 func dataHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
+	case http.MethodHead:
+		w.Header().Set("Content-Length", strconv.Itoa(len(globalData)))
+		w.WriteHeader(http.StatusOK)
 	case http.MethodGet:
 		w.Header().Set("Content-Length", strconv.Itoa(len(globalData)))
 		w.Write(globalData)
@@ -115,6 +118,7 @@ func main() {
 		doGet bool
 		doLoop bool
 		doPerf bool
+		doPerfHead bool
 		addr string
 		object_size uint64 = 1<<30
 		ucxMode bool
@@ -130,6 +134,7 @@ func main() {
 	flag.BoolVar(&doLoop, "l", false, "PUT-GET");
 	flag.IntVar(&window, "w", 1, "window");
 	flag.BoolVar(&doPerf, "P", false, "perf");
+	flag.BoolVar(&doPerfHead, "H", false, "perf HEAD");
 	flag.StringVar(&messageSizes, "m", "1073741824", "messages sizes");
 	flag.StringVar(&addr, "a", "2.1.3.34:13337", "Address");
 	flag.BoolVar(&ucxMode, "U", false, "use UCX");
@@ -144,7 +149,7 @@ func main() {
 		obj := make([]byte, object_size)
 		rand.Read(obj)
 		globalData = obj
-		http.HandleFunc("/", rootHandler)
+		http.HandleFunc("/$", rootHandler)
 		http.HandleFunc("/hello", helloHandler)
 		http.HandleFunc("/data", dataHandler)
 		http.HandleFunc("/data/", dataHandler2)
@@ -233,9 +238,9 @@ func main() {
 		client := &http.Client{Transport: t}
 		resp, err := client.Get(fmt.Sprintf("http://%s/", addr))
 		fmt.Printf("%v %v\n", resp, err)
-		defer resp.Body.Close()
 		body, _ := ioutil.ReadAll(resp.Body)
 		fmt.Printf("%s\n", body)
+		resp.Body.Close()
 
 		for i := 0; i < 30 ; i++ {
 			url := fmt.Sprintf("http://%s/data/%d", addr, 1 << i)
@@ -249,6 +254,9 @@ func main() {
 			fmt.Printf("%s\n", url)
 			getResp.Body.Close()
 		}
+		resp, err = client.Get(fmt.Sprintf("http://%s/wrong", addr))
+		fmt.Printf("%v %v\n", resp, err)
+		resp.Body.Close()
 	} else if doPerf {
 		var t http.RoundTripper
 		if ucxMode {
@@ -311,7 +319,53 @@ func main() {
 			close(done)
 			fmt.Printf("%20d %20f\n", size, float64(total)/float64(time.Since(start).Seconds())*1e-6)
 		}
+	} else if doPerfHead {
+		var t http.RoundTripper
+		if ucxMode {
+			t, _ = uhttp.NewTransport()
+		}
+		client := &http.Client{Transport: t}
 
+		start := time.Now()
+		url := fmt.Sprintf("http://%s/data", addr)
+		var total int64
+		var wg sync.WaitGroup
+		wg.Add(window)
+		done := make(chan struct{})
+		go func() {
+			last := atomic.LoadInt64(&total)
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					curr := atomic.LoadInt64(&total)
+					fmt.Printf("%20f\n", float64(curr-last))
+					last = curr
+				case <-done:
+					return
+				}
+			}
+		}()
+
+		for t := 0; t < window; t++ {
+			go func() {
+				for i := uint64(0); i < volume ; i++ {
+					getReq, _ := http.NewRequest("HEAD", url, nil)
+					getResp, err := client.Do(getReq)
+					if err != nil {
+						log.Fatalf("FATAL: Error downloading: %v", err)
+					}
+					getResp.Body.Close()
+					atomic.AddInt64(&total, 1)
+				}
+				wg.Done()
+			}()
+		}
+		wg.Wait()
+		close(done)
+		fmt.Printf("%20f\n", float64(total)/float64(time.Since(start).Seconds()))
 	} else {
 		t, _ := uhttp.NewTransport()
 		defer t.Close()
