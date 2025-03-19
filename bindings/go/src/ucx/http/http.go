@@ -6,13 +6,17 @@ package http
 */
 import "C"
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +25,36 @@ import (
 
 	"github.com/openucx/ucx/bindings/go/src/ucx"
 )
+
+var (
+	logLevel slog.LevelVar
+	logger *slog.Logger
+	levelTrace = slog.Level(-8)
+	levelTraceReq = slog.Level(-9)
+)
+
+func init() {
+	logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{ Level: &logLevel }))
+	levelStr := os.Getenv("GO_UCX_HTTP_LOG_LEVEL")
+	switch strings.ToUpper(levelStr) {
+	case "TRACE": logLevel.Set(levelTrace)
+	case "REQ": logLevel.Set(levelTraceReq)
+	}
+}
+
+func trace(args ...any) {
+	pc, _, line, _ := runtime.Caller(1)
+	src := fmt.Sprintf("%s:%d", runtime.FuncForPC(pc).Name(), line)
+	args = append([]interface{}{"src", src}, args...)
+	logger.Log(context.Background(), levelTrace, "http", args...)
+}
+
+func traceReq(args ...any) {
+	pc, _, line, _ := runtime.Caller(1)
+	src := fmt.Sprintf("%s:%d", runtime.FuncForPC(pc).Name(), line)
+	args = append([]interface{}{"src", src}, args...)
+	logger.Log(context.Background(), levelTraceReq, "http", args...)
+}
 
 const AM_REQ = 1
 const AM_RESP = 2
@@ -32,12 +66,12 @@ func getBuf(buf []byte) (unsafe.Pointer, uint64) {
 	return nil, 0
 }
 
-type context struct {
+type ctx struct {
 	context *ucx.UcpContext
 	worker *ucx.UcpWorker
 }
 
-func (c *context) Init() {
+func (c *ctx) Init() {
 	contextParams := ucx.UcpParams{}
 	contextParams.EnableAM()
 	contextParams.EnableStream()
@@ -57,17 +91,17 @@ func (c *context) Init() {
 	c.worker = worker
 }
 
-func (c *context) Close() {
+func (c *ctx) Close() {
 	c.worker.Close()
 	c.context.Close()
 }
 
-func (c *context) Progress() {
+func (c *ctx) Progress() {
 	c.worker.Progress();
 }
 
 type Server struct {
-	context
+	ctx
 	listener *ucx.UcpListener
 	handler http.Handler
 }
@@ -75,6 +109,10 @@ type Server struct {
 type reqKey struct {
 	host string
 	id int
+}
+
+func (key reqKey) LogValue() slog.Value {
+	return slog.IntValue(key.id)
 }
 
 type responseWriter struct {
@@ -135,6 +173,7 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 		return
 	}
 	w.headerSent = true
+	traceReq("id", w.key, "status", statusCode)
 }
 
 type dataReader struct {
@@ -163,6 +202,7 @@ func (r *dataReader) Read(p []byte) (length int, res error) {
 		}
 		length = <-r.read
 		r.left -= length
+		traceReq("id", r.key, "length", length, "left", r.left)
 		if r.left < 0 {
 			log.Fatalf("Read underrun")
 		}
@@ -226,6 +266,7 @@ func (s *Server) handleRequest(header unsafe.Pointer, headerSize uint64, data *u
 		key: key,
 		wrote: make(chan struct{}, 1),
 	}
+	trace("url", req.URL, "id", key, "length", contentLength)
 
 	go s.handler.ServeHTTP(writer, req)
 	return ucx.UCS_OK
@@ -311,7 +352,7 @@ type tracker struct {
 }
 
 type Transport struct {
-	context
+	ctx
 	quit chan struct{}
 	reqs sync.Map
 	conns sync.Map
@@ -380,6 +421,7 @@ func (c *connection) donePending(tr *tracker, f int, reqId int) {
 
 	tr.pending &= ^f
 	if tr.pending == 0 {
+		traceReq("id", reqId, "f", f)
 		c.putCh(reqId)
 		c.transport.reqs.Delete(reqId)
 	}
@@ -391,6 +433,7 @@ func (c *connection) roundTrip(req *http.Request) (*http.Response, error) {
 		host: c.host,
 		id: reqId,
 	}
+	traceReq("url", req.URL, "id", key, "length", req.ContentLength)
 	headerMap := map[string]string{
 		"ucx-method": req.Method,
 		"ucx-url": req.URL.String(),
@@ -432,6 +475,7 @@ func (c *connection) roundTrip(req *http.Request) (*http.Response, error) {
 			c.donePending(tr, TR_PENDING_SEND, reqId)
 			request.Close()
 		})
+		traceReq("url", req.URL, "length", dataLen)
 		tr.pending |= TR_PENDING_SEND
 		_, err := c.ep.SendStreamNonBlocking(reqId, dataPtr, dataLen, reqParams)
 		if err != nil {
@@ -440,8 +484,12 @@ func (c *connection) roundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	select {
-	case resp := <-tr.resp: return resp, nil
-	case err := <-c.err: return nil, err
+	case resp := <-tr.resp:
+		trace("url", req.URL, "resp", resp.StatusCode)
+		return resp, nil
+	case err := <-c.err:
+		trace("url", req.URL, "err", err)
+		return nil, err
 	}
 }
 
@@ -479,6 +527,7 @@ func (t *Transport) handleResponse(header unsafe.Pointer, headerSize uint64, dat
 		reader.left = 0
 	}
 
+	traceReq("host", key.host, "id", key.id, "status", headerMap["ucx-code"])
 	resp := &http.Response{
 		Header: make(http.Header),
 		Body: reader,
