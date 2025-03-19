@@ -451,6 +451,23 @@ ucp_stream_rndv_rtr_probe(const ucp_proto_init_params_t *init_params)
     ucp_proto_rndv_ctrl_probe(&params, &priv, sizeof(priv));
 }
 
+void ucp_stream_pmpy_ctrl_abort(ucp_request_t *req, ucs_status_t status)
+{
+    ucp_send_request_id_release(req);
+    ucp_datatype_iter_mem_dereg(&req->send.state.dt_iter, UCP_DT_MASK_ALL);
+    ucp_request_complete_send(req, status);
+}
+
+ucs_status_t ucp_stream_pmpy_ctrl_reset(ucp_request_t *req)
+{
+    if (req->flags & UCP_REQUEST_FLAG_PROTO_INITIALIZED) {
+        ucp_send_request_id_release(req);
+        ucp_proto_request_zcopy_clean(req, UCP_DT_MASK_ALL);
+    }
+
+    return UCS_OK;
+}
+
 ucp_proto_t ucp_stream_rndv_rtr_proto = {
     .name     = "rndv/rtr",
     .desc     = "rndv rtr",
@@ -458,8 +475,8 @@ ucp_proto_t ucp_stream_rndv_rtr_proto = {
     .probe    = ucp_stream_rndv_rtr_probe,
     .query    = ucp_proto_default_query,
     .progress = {ucp_stream_pmpy_ctrl_progress},
-    .abort    = ucp_proto_request_zcopy_abort,
-    .reset    = ucp_proto_request_zcopy_id_reset
+    .abort    = ucp_stream_pmpy_ctrl_abort,
+    .reset    = ucp_stream_pmpy_ctrl_reset
 };
 
 ucs_status_t ucp_stream_rndv_handle_rtr(void *am_arg, void *am_hdr,
@@ -506,8 +523,8 @@ ucp_proto_t ucp_stream_rndv_rts_proto = {
     .probe    = ucp_stream_rndv_rts_probe,
     .query    = ucp_proto_default_query,
     .progress = {ucp_stream_pmpy_ctrl_progress},
-    .abort    = ucp_proto_request_zcopy_abort,
-    .reset    = ucp_proto_request_zcopy_id_reset
+    .abort    = ucp_stream_pmpy_ctrl_abort,
+    .reset    = ucp_stream_pmpy_ctrl_reset,
 };
 
 static ucs_status_t ucp_stream_rndv_zcopy_send_func(
