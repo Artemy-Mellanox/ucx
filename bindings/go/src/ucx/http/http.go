@@ -40,6 +40,11 @@ func init() {
 	case "TRACE": logLevel.Set(levelTrace)
 	case "REQ": logLevel.Set(levelTraceReq)
 	}
+
+	ucsLevelStr := os.Getenv("UCX_LOG_LEVEL")
+	if ucsLevelStr != "" {
+		ucx.SetLogger(logger)
+	}
 }
 
 func trace(args ...any) {
