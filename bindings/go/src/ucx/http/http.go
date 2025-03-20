@@ -161,7 +161,7 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 	if _, hasLength := w.headers["Content-Length"]; !hasLength {
 		if w.length > 0 {
 			w.headers.Set("Content-Length", strconv.Itoa(w.length))
-		} else {
+		} else if statusCode != http.StatusOK {
 			return;
 		}
 	}
@@ -436,6 +436,7 @@ func (c *connection) donePending(tr *tracker, f int, reqId int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	traceReq("id", reqId, "f", f, "pending", tr.pending)
 	tr.pending &= ^f
 	if tr.pending == 0 {
 		traceReq("id", reqId, "f", f)
