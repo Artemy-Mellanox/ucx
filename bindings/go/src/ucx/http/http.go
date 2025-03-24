@@ -373,6 +373,7 @@ type Transport struct {
 	quit chan struct{}
 	reqs sync.Map
 	conns sync.Map
+	mu sync.Mutex
 }
 
 type connection struct {
@@ -546,41 +547,43 @@ func (t *Transport) handleResponse(header unsafe.Pointer, headerSize uint64, dat
 	}
 
 	resp := &http.Response{
-		Header: make(http.Header),
 		Body: reader,
-		Status: headerMap["ucx-code"],
 	}
 
 	reader.onClose = func() {
 		conn.donePending(tr, TR_PENDING_RECV, key.id)
 	}
 
-	statusCode, _, _ := strings.Cut(resp.Status, " ")
-	resp.StatusCode, _ = strconv.Atoi(statusCode)
-	resp.ContentLength = contentLength
-	traceReq("host", key.host, "id", key.id, "status", headerMap["ucx-code"], "length", contentLength, "left", reader.left)
-
-	for k, v := range headerMap {
-		resp.Header.Set(k,v)
-	}
+	resp.Header = http.Header(respHeader.unpackMap())
+	resp.StatusCode = status
+	resp.ContentLength = length
+	traceReq("host", key.host, "id", key.id, "status", status, "length", length, "left", reader.left)
 
 	tr.resp <- resp
 	return ucx.UCS_OK
 }
 
-func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	host := req.URL.Host
-	var conn *connection
+func (t *Transport) getConnection(host string) (*connection, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	c, has := t.conns.Load(host)
 	if has {
-		conn = c.(*connection)
-	} else {
-		var err error
-		conn, err = t.newConnection(host)
-		if err != nil {
-			return nil, err
-		}
-		t.conns.Store(host, conn)
+		return c.(*connection), nil
+	}
+
+	conn, err := t.newConnection(host)
+	if err != nil {
+		return nil, err
+	}
+	t.conns.Store(host, conn)
+	return conn, nil
+}
+
+func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	conn, err := t.getConnection(req.URL.Host)
+	if err != nil {
+		return nil, err
 	}
 
 	return conn.roundTrip(req);
