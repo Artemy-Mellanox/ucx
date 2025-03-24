@@ -7,7 +7,6 @@ package http
 import "C"
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -195,25 +194,19 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 		} else if statusCode != http.StatusOK {
 			return;
 		}
+	} else {
+		w.length, _ = strconv.Atoi(w.headers.Get("Content-Length"))
 	}
 
-	headerMap := map[string]string{
-		"ucx-code": strconv.Itoa(w.status),
-		"ucx-id": strconv.Itoa(w.key.id),
-		"ucx-host": w.key.host,
-	}
+	respHeader := newPack()
+	respHeader.int(w.status)
+	respHeader.int(w.key.id)
+	respHeader.string(w.key.host)
+	respHeader.int64(int64(w.length))
+	respHeader.strmap(w.headers)
 
-	for k, v := range w.headers {
-		headerMap[k] = v[0]
-	}
-
-	header, err := json.Marshal(headerMap)
-	if err != nil {
-		return
-	}
-
-	headerPtr, headerLen := getBuf(header)
-	_, err = w.ep.SendAmNonBlocking(AM_RESP,
+	headerPtr, headerLen := getBuf(respHeader)
+	_, err := w.ep.SendAmNonBlocking(AM_RESP,
 		headerPtr, headerLen, nil, 0,
 		ucx.UCP_AM_SEND_FLAG_REPLY, nil)
 	if err != nil {
@@ -267,46 +260,30 @@ func (r *dataReader) Close() (error) {
 	return nil
 }
 
-func handleAm(header unsafe.Pointer, headerSize uint64, replyEp *ucx.UcpEp) (map[string]string, *dataReader, int64, reqKey, error) {
-	var headerMap map[string]string
-	if headerSize > 0 {
-		headerBytes := ucx.GoBytes(header, headerSize)
-		if err := json.Unmarshal(headerBytes, &headerMap); err != nil {
-			return nil, nil, 0, reqKey{}, err
-		}
-	}
-
-	length, _ := strconv.ParseInt(headerMap["Content-Length"], 10, 64)
-	id, _ := strconv.Atoi(headerMap["ucx-id"])
+func (s *Server) handleRequest(header unsafe.Pointer, headerSize uint64, data *ucx.UcpAmData, replyEp *ucx.UcpEp) ucx.UcsStatus {
+	headerBytes := ucx.GoBytes(header, headerSize)
+	reqHeader := unpack{ b: headerBytes }
+	method := reqHeader.string()
+	url := reqHeader.string()
 	key := reqKey{
-		id: id,
-		host: headerMap["ucx-host"],
+		id: reqHeader.int(),
+		host: reqHeader.string(),
 	}
-	r := &dataReader {
+	length := reqHeader.int64()
+	header := reqHeader.strmap()
+
+	reader := &dataReader {
 		ep: replyEp,
 		left: int(length),
 		key: key,
 		read: make(chan int, 1),
 	}
 
-	return headerMap, r, length, key, nil
-}
-
-func (s *Server) handleRequest(header unsafe.Pointer, headerSize uint64, data *ucx.UcpAmData, replyEp *ucx.UcpEp) ucx.UcsStatus {
-	headerMap, reader, contentLength, key, err := handleAm(header, headerSize, replyEp)
-	if err != nil {
-		fmt.Printf("request %v\n", err)
-		return ucx.UCS_ERR_IO_ERROR
-	}
-
-	req, _ := http.NewRequest(headerMap["ucx-method"], headerMap["ucx-url"], reader)
-	for k, v := range headerMap {
-		if !strings.HasPrefix(k, "ucx-") {
-			req.Header.Set(k,v)
-		}
-	}
-	req.ContentLength = contentLength
+	req, _ := http.NewRequest(method, url, reader)
+	req.Header = header
+	req.ContentLength = length
 	req.RequestURI = req.URL.EscapedPath()
+
 	writer := &responseWriter{
 		ep: replyEp,
 		headers: make(http.Header),
@@ -314,7 +291,7 @@ func (s *Server) handleRequest(header unsafe.Pointer, headerSize uint64, data *u
 		wrote: make(chan struct{}, 1),
 		status: http.StatusOK,
 	}
-	trace("url", req.URL, "id", key, "length", contentLength)
+	trace("url", req.URL, "id", key, "length", length)
 
 	go s.handler.ServeHTTP(writer, req)
 	return ucx.UCS_OK
@@ -483,29 +460,21 @@ func (c *connection) roundTrip(req *http.Request) (*http.Response, error) {
 		id: reqId,
 	}
 	traceReq("url", req.URL, "id", key, "length", req.ContentLength)
-	headerMap := map[string]string{
-		"ucx-method": req.Method,
-		"ucx-url": req.URL.String(),
-		"ucx-id": strconv.Itoa(reqId),
-		"ucx-host": c.host,
-		"Content-Length": strconv.FormatInt(req.ContentLength, 10),
-	}
 
-	for k, v := range req.Header {
-		headerMap[k] = v[0]
-	}
-
-	header, err := json.Marshal(headerMap)
-	if err != nil {
-		return nil, err
-	}
+	reqHeader := newPack()
+	reqHeader.string(req.Method)
+	reqHeader.string(req.URL.String())
+	reqHeader.int(reqId)
+	reqHeader.string(c.host)
+	reqHeader.int64(req.ContentLength)
+	reqHeader.strmap(req.Header)
 
 	tr := c.transport.trPool.Get().(*tracker)
 	tr.noBody = req.Method == http.MethodHead
 	tr.pending = TR_PENDING_RECV
 	c.transport.reqs.Store(key, tr)
 
-	headerPtr, headerLen := getBuf(header)
+	headerPtr, headerLen := getBuf(reqHeader)
 	send, err := c.ep.SendAmNonBlocking(AM_REQ,
 		headerPtr, headerLen, nil, 0,
 		ucx.UCP_AM_SEND_FLAG_REPLY, nil)
@@ -557,10 +526,23 @@ func NewTransport() (*Transport, error) {
 }
 
 func (t *Transport) handleResponse(header unsafe.Pointer, headerSize uint64, data *ucx.UcpAmData, replyEp *ucx.UcpEp) ucx.UcsStatus {
-	headerMap, reader, contentLength, key, err := handleAm(header, headerSize, replyEp)
-	if err != nil {
-		fmt.Printf("handleResponse %v\n", err)
-		return ucx.UCS_ERR_IO_ERROR
+	headerBytes := ucx.GoBytes(header, headerSize)
+	respHeader := unpack{ b: headerBytes }
+
+	status := respHeader.int()
+	key := reqKey{
+		id: int(respHeader.uint64()),
+		host: respHeader.string(),
+	}
+
+	length := respHeader.int64()
+	header := respHeader.strmap()
+
+	reader := &dataReader {
+		ep: replyEp,
+		left: int(length),
+		key: key,
+		read: make(chan int, 1),
 	}
 
 	req, _ := t.reqs.Load(key)
@@ -574,15 +556,15 @@ func (t *Transport) handleResponse(header unsafe.Pointer, headerSize uint64, dat
 
 	resp := &http.Response{
 		Body: reader,
+		Header: header,
+		StatusCode: status,
+		ContentLength: length,
 	}
 
 	reader.onClose = func() {
 		conn.donePending(tr, TR_PENDING_RECV, key.id)
 	}
 
-	resp.Header = http.Header(respHeader.unpackMap())
-	resp.StatusCode = status
-	resp.ContentLength = length
 	traceReq("host", key.host, "id", key.id, "status", status, "length", length, "left", reader.left)
 
 	tr.resp <- resp
