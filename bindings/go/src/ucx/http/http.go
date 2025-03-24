@@ -402,6 +402,7 @@ type Transport struct {
 	reqs sync.Map
 	conns sync.Map
 	mu sync.Mutex
+	trPool sync.Pool
 }
 
 type connection struct {
@@ -471,6 +472,7 @@ func (c *connection) donePending(tr *tracker, f int, reqId int) {
 		traceReq("id", reqId, "f", f)
 		c.putCh(reqId)
 		c.transport.reqs.Delete(reqId)
+		c.transport.trPool.Put(tr)
 	}
 }
 
@@ -498,11 +500,9 @@ func (c *connection) roundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 
-	tr := &tracker{
-		resp: make(chan *http.Response),
-		noBody: req.Method == http.MethodHead,
-		pending: TR_PENDING_RECV,
-	}
+	tr := c.transport.trPool.Get().(*tracker)
+	tr.noBody = req.Method == http.MethodHead
+	tr.pending = TR_PENDING_RECV
 	c.transport.reqs.Store(key, tr)
 
 	headerPtr, headerLen := getBuf(header)
@@ -544,6 +544,14 @@ func NewTransport() (*Transport, error) {
 	t := new(Transport)
 	t.Init()
 	t.worker.SetAmRecvHandler(AM_RESP, ucx.UCP_AM_FLAG_PERSISTENT_DATA, t.handleResponse)
+	t.trPool = sync.Pool{
+		New: func() interface{} {
+			return &tracker{
+				resp: make(chan *http.Response),
+			}
+		},
+	}
+
 	go t.progress()
 	return t, nil
 }
