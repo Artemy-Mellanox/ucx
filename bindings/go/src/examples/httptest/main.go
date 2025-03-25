@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -11,10 +12,12 @@ import (
 	"math/rand"
 	"bytes"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -146,6 +149,9 @@ func main() {
 
 	_, object_size, _ = sizes(messageSizes)
 	if serverMode {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
 		obj := make([]byte, object_size)
 		rand.Read(obj)
 		globalData = obj
@@ -155,15 +161,26 @@ func main() {
 		http.HandleFunc("/data/", dataHandler2)
 
 		if ucxMode {
-			serve, err := uhttp.StartServer(addr, http.DefaultServeMux)
+			server, err := uhttp.NewServer(addr, http.DefaultServeMux)
 			if err != nil {
 				log.Fatalf("FATAL: StartServer: %v", err)
 			}
+			go func() {
+				<-sigChan
+				server.Close()
+			}()
 			fmt.Printf("Serve UCX on %s\n", addr)
-			serve()
+			server.Serve()
 		} else {
+			server := &http.Server{
+				Addr: addr,
+			}
+			go func() {
+				<-sigChan
+				server.Shutdown(context.Background())
+			}()
 			fmt.Printf("Serve HTTP on %s\n", addr)
-			err := http.ListenAndServe(addr, nil)
+			err := server.ListenAndServe()
 			if err != nil {
 				log.Fatalf("FATAL: StartServer: %v", err)
 			}
