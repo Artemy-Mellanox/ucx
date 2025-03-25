@@ -74,6 +74,7 @@ func getBuf(buf []byte) (unsafe.Pointer, uint64) {
 type ctx struct {
 	context *ucx.UcpContext
 	worker *ucx.UcpWorker
+	quit chan struct{}
 }
 
 func (c *ctx) Init() {
@@ -94,15 +95,22 @@ func (c *ctx) Init() {
 
 	c.context = context
 	c.worker = worker
+	c.quit = make(chan struct{})
 }
 
 func (c *ctx) Close() {
+	c.quit <- struct{}{}
 	c.worker.Close()
 	c.context.Close()
 }
 
-func (c *ctx) Progress() {
-	c.worker.Progress();
+func (c *ctx) progress() {
+	for {
+		select {
+		case <-c.quit: return
+		default: c.worker.Progress();
+		}
+	}
 }
 
 type Server struct {
@@ -310,7 +318,7 @@ func (s *Server) servConn(conn *ucx.UcpConnectionRequest) {
 
 func (s *Server) Close() {
 	s.listener.Close()
-	s.context.Close()
+	s.ctx.Close()
 }
 
 func NewServer(addr string, handler http.Handler) (*Server, error) {
@@ -339,9 +347,7 @@ func NewServer(addr string, handler http.Handler) (*Server, error) {
 }
 
 func (s *Server) Serve() {
-	for {
-		s.Progress();
-	}
+	s.progress()
 }
 
 func StartServer(addr string, handler http.Handler) (serve func() error, err error) {
@@ -370,7 +376,6 @@ type tracker struct {
 
 type Transport struct {
 	ctx
-	quit chan struct{}
 	reqs sync.Map
 	conns sync.Map
 	mu sync.Mutex
@@ -515,19 +520,9 @@ func (c *connection) roundTrip(req *http.Request) (*http.Response, error) {
 func NewTransport() (*Transport, error) {
 	t := new(Transport)
 	t.Init()
-	t.quit = make(chan struct{})
 	t.worker.SetAmRecvHandler(AM_RESP, ucx.UCP_AM_FLAG_PERSISTENT_DATA, t.handleResponse)
 	go t.progress()
 	return t, nil
-}
-
-func (t *Transport) progress() {
-	for {
-		select {
-		case <-t.quit: return
-		default: t.Progress()
-		}
-	}
 }
 
 func (t *Transport) handleResponse(header unsafe.Pointer, headerSize uint64, data *ucx.UcpAmData, replyEp *ucx.UcpEp) ucx.UcsStatus {
@@ -590,8 +585,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func (t *Transport) Close() {
-	t.quit <- struct{}{}
-	t.context.Close()
+	t.ctx.Close()
 }
 
 func Dump(o interface{}) string {
