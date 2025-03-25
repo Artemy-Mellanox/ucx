@@ -33,8 +33,37 @@ var (
 	levelTraceReq = slog.Level(-9)
 )
 
+type traceHandler struct {
+	h slog.Handler
+}
+
+func (h *traceHandler) Enabled(ctx context.Context, level slog.Level) bool {
+    return h.h.Enabled(ctx, level)
+}
+
+func (h *traceHandler) Handle(ctx context.Context, r slog.Record) error {
+	fs := runtime.CallersFrames([]uintptr{r.PC})
+        f, _ := fs.Next()
+	var b strings.Builder
+	b.WriteString(f.Function)
+	b.WriteString(":")
+	b.WriteString(strconv.Itoa(f.Line))
+	r.Add("src", b.String())
+	return h.h.Handle(ctx, r)
+}
+
+func (h *traceHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+    return &traceHandler{h: h.h.WithAttrs(attrs)}
+}
+
+func (h *traceHandler) WithGroup(name string) slog.Handler {
+    return &traceHandler{h: h.h.WithGroup(name)}
+}
+
 func init() {
-	logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{ Level: &logLevel }))
+	textHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{ Level: &logLevel })
+	handler := &traceHandler{h: textHandler}
+	logger = slog.New(handler)
 	levelStr := os.Getenv("GO_UCX_HTTP_LOG_LEVEL")
 	switch strings.ToUpper(levelStr) {
 	case "TRACE": logLevel.Set(levelTrace)
@@ -48,16 +77,10 @@ func init() {
 }
 
 func trace(args ...any) {
-	pc, _, line, _ := runtime.Caller(1)
-	src := fmt.Sprintf("%s:%d", runtime.FuncForPC(pc).Name(), line)
-	args = append([]interface{}{"src", src}, args...)
 	logger.Log(context.Background(), levelTrace, "http", args...)
 }
 
 func traceReq(args ...any) {
-	pc, _, line, _ := runtime.Caller(1)
-	src := fmt.Sprintf("%s:%d", runtime.FuncForPC(pc).Name(), line)
-	args = append([]interface{}{"src", src}, args...)
 	logger.Log(context.Background(), levelTraceReq, "http", args...)
 }
 
