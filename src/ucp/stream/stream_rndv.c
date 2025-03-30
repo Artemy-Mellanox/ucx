@@ -256,7 +256,7 @@ ucp_stream_pmpy_send(ucp_ep_h ep, ucp_request_t *req, const void *buffer,
     }
 
     if (req->send.stream.pending > 0) {
-        goto out;
+        goto set_param;
     }
 
     if (req->send.state.dt_iter.offset == req->send.state.dt_iter.length) {
@@ -264,14 +264,18 @@ ucp_stream_pmpy_send(ucp_ep_h ep, ucp_request_t *req, const void *buffer,
         /* unreachable */
     }
 
-    // TODO set callback
     status = ucp_stream_pmpy_ctrl(ep->worker, ep, req, UCP_OP_ID_STREAM_SEND);
     if (status != UCS_OK) {
         ucp_request_put_param(param, req);
         return UCS_STATUS_PTR(status);
     }
 
-out:
+    if (req->flags & UCP_REQUEST_FLAG_COMPLETED) {
+        ucp_request_put_param(param, req);
+        return UCS_OK;
+    }
+
+set_param:
     if (param->op_attr_mask & UCP_OP_ATTR_FIELD_CALLBACK) {
         req->flags    |= UCP_REQUEST_FLAG_CALLBACK;
         req->send.cb   = param->cb.send;
