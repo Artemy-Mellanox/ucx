@@ -125,6 +125,7 @@ func main() {
 		window int
 		messageSizes string
 		volume uint64
+		maxIter uint64
 		profile string
 	)
 
@@ -135,6 +136,7 @@ func main() {
 	flag.StringVar(&messageSizes, "m", "1073741824", "messages sizes");
 	flag.StringVar(&addr, "a", "2.1.3.34:13337", "Address");
 	flag.BoolVar(&ucxMode, "U", false, "use UCX");
+	flag.Uint64Var(&maxIter, "i", 1000, "iter");
 	flag.Uint64Var(&volume, "v", 1099511627776, "volume");
 	flag.StringVar(&profile, "P", "", "Profile directory");
 
@@ -300,6 +302,12 @@ func main() {
 		var t http.RoundTripper
 		if ucxMode {
 			t, _ = uhttp.NewTransport()
+		} else {
+			t = &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 100,
+				IdleConnTimeout:     90 * time.Second,
+			}
 		}
 		client := &http.Client{Transport: t}
 
@@ -332,6 +340,9 @@ func main() {
 				go func() {
 					content := make([]byte, size)
 					iter := volume / size
+					if iter > maxIter {
+						iter = maxIter
+					}
 					for i := uint64(0); i < iter ; i++ {
 						getReq, _ := http.NewRequest("GET", url, nil)
 						getResp, err := client.Do(getReq)
@@ -390,7 +401,7 @@ func main() {
 
 		for t := 0; t < window; t++ {
 			go func() {
-				for i := uint64(0); i < volume ; i++ {
+				for i := uint64(0); i < maxIter ; i++ {
 					getReq, _ := http.NewRequest("HEAD", url, nil)
 					getResp, err := client.Do(getReq)
 					if err != nil {
