@@ -270,7 +270,7 @@ func (s *Server) handleRequest(header unsafe.Pointer, headerSize uint64, data *u
 		host: reqHeader.string(),
 	}
 	length := reqHeader.int64()
-	header := reqHeader.strmap()
+	headerMap := reqHeader.strmap()
 
 	reader := &dataReader {
 		ep: replyEp,
@@ -280,7 +280,7 @@ func (s *Server) handleRequest(header unsafe.Pointer, headerSize uint64, data *u
 	}
 
 	req, _ := http.NewRequest(method, url, reader)
-	req.Header = header
+	req.Header = headerMap
 	req.ContentLength = length
 	req.RequestURI = req.URL.EscapedPath()
 
@@ -531,12 +531,12 @@ func (t *Transport) handleResponse(header unsafe.Pointer, headerSize uint64, dat
 
 	status := respHeader.int()
 	key := reqKey{
-		id: int(respHeader.uint64()),
+		id: respHeader.int(),
 		host: respHeader.string(),
 	}
 
 	length := respHeader.int64()
-	header := respHeader.strmap()
+	headerMap := respHeader.strmap()
 
 	reader := &dataReader {
 		ep: replyEp,
@@ -556,7 +556,7 @@ func (t *Transport) handleResponse(header unsafe.Pointer, headerSize uint64, dat
 
 	resp := &http.Response{
 		Body: reader,
-		Header: header,
+		Header: headerMap,
 		StatusCode: status,
 		ContentLength: length,
 	}
