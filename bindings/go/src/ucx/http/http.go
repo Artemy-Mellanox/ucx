@@ -173,7 +173,7 @@ func (w *responseWriter) Write(data []byte) (int, error) {
 	dataPtr, dataLen := getBuf(data)
 	if !w.headerSent {
 		w.length = int(dataLen)
-		w.WriteHeader(w.status)
+		w.sendHeader()
 	}
 	reqParams := &ucx.UcpRequestParams{}
 	reqParams.SetCallback(w.onData)
@@ -187,13 +187,11 @@ func (w *responseWriter) Write(data []byte) (int, error) {
 
 func (w *responseWriter) WriteHeader(statusCode int) {
 	w.status = statusCode
+}
 
+func (w *responseWriter) sendHeader() {
 	if _, hasLength := w.headers["Content-Length"]; !hasLength {
-		if w.length > 0 {
-			w.headers.Set("Content-Length", strconv.Itoa(w.length))
-		} else if statusCode != http.StatusOK {
-			return;
-		}
+		w.headers.Set("Content-Length", strconv.Itoa(w.length))
 	} else {
 		w.length, _ = strconv.Atoi(w.headers.Get("Content-Length"))
 	}
@@ -213,7 +211,7 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 		return
 	}
 	w.headerSent = true
-	traceReq("id", w.key, "status", statusCode, "length", w.headers.Get("Content-Length"))
+	traceReq("id", w.key, "status", w.status, "length", w.headers.Get("Content-Length"))
 }
 
 type dataReader struct {
@@ -293,7 +291,12 @@ func (s *Server) handleRequest(header unsafe.Pointer, headerSize uint64, data *u
 	}
 	trace("url", req.URL, "id", key, "length", length)
 
-	go s.handler.ServeHTTP(writer, req)
+	go func() {
+		s.handler.ServeHTTP(writer, req)
+		if !writer.headerSent {
+			writer.sendHeader()
+		}
+	}()
 	return ucx.UCS_OK
 }
 
