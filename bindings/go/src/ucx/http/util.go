@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/binary"
+	"net/textproto"
 )
 
 type pack []byte
@@ -54,7 +55,7 @@ func (p *pack) string(s string) {
 func (p *pack) strmap(m map[string][]string) {
         p.uint16(uint16(len(m)))
 	for k, vv := range m {
-		p.string(k)
+		p.string(textproto.CanonicalMIMEHeaderKey(k))
 		p.uint16(uint16(len(vv)))
 		for _, v := range vv {
 			p.string(v)
