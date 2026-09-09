@@ -19,6 +19,7 @@
 #include <ucs/type/serialize.h>
 #include <uct/ib/base/ib_verbs.h>
 #include <uct/ib/mlx5/rc/rc_mlx5.h>
+#include <uct/ib/mlx5/ib_mlx5.inl>
 #include <uct/cuda/cuda_copy/cuda_copy_md.h>
 #include <uct/cuda/base/cuda_util.h>
 #include <uct/cuda/base/cuda_ctx.h>
@@ -417,38 +418,129 @@ uct_rc_gdaki_channel_block(uct_rc_gdaki_iface_t *iface, ucs_mpool_t *mp,
     }
 }
 
+/* Deferred continuation of one channel's reset cycle, run from the shared
+ * worker progress queue once IBV_EVENT_QP_LAST_WQE_REACHED fires for this
+ * channel's QP (or once force-drained at iface cleanup). Performs the same
+ * RESET -> txwq_reset -> RST2INIT sequence gdaki always did, just deferred
+ * until the QP has actually drained. */
+static unsigned uct_rc_gdaki_channel_cleanup_progress(void *arg)
+{
+    uct_rc_gdaki_channel_cleanup_ctx_t *ch_ctx  = arg;
+    uct_rc_gdaki_block_cleanup_ctx_t *block_ctx = ch_ctx->block;
+    uct_rc_gdaki_iface_t *iface                 = block_ctx->iface;
+    uct_ib_iface_t *ib_iface                    = &iface->super.super.super;
+    ucs_status_t status;
+
+    uct_ib_device_async_event_unregister(uct_ib_iface_device(ib_iface),
+                                         IBV_EVENT_QP_LAST_WQE_REACHED,
+                                         ch_ctx->channel->qp.super.qp_num);
+
+    status = uct_ib_mlx5_modify_qp_state(ib_iface, &ch_ctx->channel->qp.super,
+                                         IBV_QPS_RESET);
+    if (status != UCS_OK) {
+        ucs_fatal("failed to reset gdaki qp 0x%x: %s",
+                  ch_ctx->channel->qp.super.qp_num, ucs_status_string(status));
+        return 1;
+    }
+
+    uct_ib_mlx5_txwq_reset(&ch_ctx->channel->qp);
+
+    status = uct_ib_mlx5_devx_qp_rst2init(ib_iface,
+                                          &ch_ctx->channel->qp.super);
+    if (status != UCS_OK) {
+        ucs_fatal("failed to move gdaki qp 0x%x to init: %s",
+                  ch_ctx->channel->qp.super.qp_num, ucs_status_string(status));
+        return 1;
+    }
+
+    ucs_list_del(&ch_ctx->list);
+
+    if (--block_ctx->pending == 0) {
+        ucs_mpool_put(block_ctx->channel_block);
+        ucs_free(block_ctx);
+    }
+
+    return 1;
+}
+
+/* Kicks off an async drain-and-reset cycle for every channel in the block:
+ * register a LAST_WQE_REACHED waiter, move the QP to IBV_QPS_ERR, then
+ * attach the waiter, and return immediately. The actual RESET/rst2init and
+ * the block's return to the pool happen later, in
+ * uct_rc_gdaki_channel_cleanup_progress(), once each channel's own drain
+ * event has fired (or is forced at iface teardown). register() must
+ * complete before the QP is moved to ERR, so that a very fast event can
+ * never be dispatched before a waiter exists to catch it. */
 static void
 uct_rc_gdaki_channel_block_reset_qps(uct_rc_gdaki_iface_t *iface,
                                      uct_rc_gdaki_channel_block_t *block)
 {
     uct_ib_iface_t *ib_iface = &iface->super.super.super;
+    uct_ib_device_t *dev     = uct_ib_iface_device(ib_iface);
+    uct_rc_gdaki_block_cleanup_ctx_t *block_ctx;
+    uct_rc_gdaki_channel_cleanup_ctx_t *ch_ctx;
     uct_rc_gdaki_channel_t *channel;
     ucs_status_t status;
     unsigned i;
 
+    block_ctx = ucs_malloc(sizeof(*block_ctx) +
+                           (iface->num_channels * sizeof(block_ctx->channels[0])),
+                           "gdaki_channel_cleanup_ctx");
+    ucs_assert_always(block_ctx != NULL);
+    block_ctx->iface         = iface;
+    block_ctx->channel_block = block;
+    block_ctx->pending       = iface->num_channels;
+
     for (i = 0; i < iface->num_channels; i++) {
         channel = &block->channels[i];
+        ch_ctx  = &block_ctx->channels[i];
 
-        (void)uct_ib_mlx5_modify_qp_state(ib_iface, &channel->qp.super,
-                                          IBV_QPS_ERR);
+        ch_ctx->block     = block_ctx;
+        ch_ctx->channel   = channel;
+        ch_ctx->super.cbq = &ib_iface->super.worker->super.progress_q;
+        ch_ctx->super.cb  = uct_rc_gdaki_channel_cleanup_progress;
+
+        status = uct_ib_device_async_event_register(
+                dev, IBV_EVENT_QP_LAST_WQE_REACHED, channel->qp.super.qp_num);
+        if (status != UCS_OK) {
+            ucs_fatal("failed to register gdaki qp 0x%x for drain: %s",
+                      channel->qp.super.qp_num, ucs_status_string(status));
+        }
 
         status = uct_ib_mlx5_modify_qp_state(ib_iface, &channel->qp.super,
-                                             IBV_QPS_RESET);
+                                             IBV_QPS_ERR);
         if (status != UCS_OK) {
-            ucs_fatal("failed to reset gdaki qp 0x%x: %s",
+            uct_ib_device_async_event_unregister(dev,
+                                                 IBV_EVENT_QP_LAST_WQE_REACHED,
+                                                 channel->qp.super.qp_num);
+            ucs_fatal("failed to move gdaki qp 0x%x to error: %s",
                       channel->qp.super.qp_num, ucs_status_string(status));
-            return;
         }
 
-        uct_ib_mlx5_txwq_reset(&channel->qp);
+        status = uct_ib_device_async_event_wait(dev,
+                                                 IBV_EVENT_QP_LAST_WQE_REACHED,
+                                                 channel->qp.super.qp_num,
+                                                 &ch_ctx->super);
+        ucs_assert_always(status == UCS_OK);
 
-        status = uct_ib_mlx5_devx_qp_rst2init(ib_iface, &channel->qp.super);
-        if (status != UCS_OK) {
-            ucs_fatal("failed to move gdaki qp 0x%x to init: %s",
-                      channel->qp.super.qp_num, ucs_status_string(status));
-            return;
-        }
+        ucs_list_add_tail(&iface->channel_gc_list, &ch_ctx->list);
     }
+}
+
+/* Forces completion of every still-pending channel drain, regardless of
+ * whether the real HW event ever arrives. Must run at iface cleanup, before
+ * QP/CQ teardown: without it, a channel still mid-drain at iface-destroy
+ * time would leak its dev->async_events_hash entry in the device-level,
+ * cross-iface-shared uct_ib_device_t. */
+static void uct_rc_gdaki_iface_cleanup_channels(uct_rc_gdaki_iface_t *iface)
+{
+    uct_rc_gdaki_channel_cleanup_ctx_t *ch_ctx, *tmp;
+
+    ucs_list_for_each_safe(ch_ctx, tmp, &iface->channel_gc_list, list) {
+        uct_rc_gdaki_channel_cleanup_progress(&ch_ctx->super);
+    }
+
+    ucs_assert(ucs_list_is_empty(&iface->channel_gc_list));
 }
 
 static void uct_rc_gdaki_chunk_channels_destroy(uct_rc_gdaki_iface_t *iface,
@@ -496,7 +588,14 @@ uct_rc_gdaki_init_channel_chunk(uct_rc_gdaki_iface_t *iface,
 
     cq_attr.flags                           |= UCT_IB_MLX5_CQ_IGNORE_OVERRUN;
     qp_attr.mmio_mode                        = UCT_IB_MLX5_MMIO_MODE_DB;
-    qp_attr.super.srq_num                    = 0;
+    /* Pooled channels are attached to a functionally-unused SRQ purely to
+     * make them eligible for IBV_EVENT_QP_LAST_WQE_REACHED, used to drain
+     * them before reset-for-reuse (see uct_rc_gdaki_channel_block_reset_qps).
+     * Direct-mode channels are destroyed outright on cleanup, with no drain
+     * step, so they keep today's behavior of no SRQ attachment. */
+    qp_attr.super.srq_num = (iface->ep_alloc_mode ==
+                             UCT_RC_GDAKI_EP_ALLOC_MODE_POOL) ?
+                                    iface->super.rx.srq.srq_num : 0;
     qp_attr.super.max_inl_cqe[UCT_IB_DIR_TX] = 0;
     uct_ib_mlx5_wq_calc_sizes(&qp_attr);
 
@@ -705,8 +804,10 @@ static void uct_rc_gdaki_cleanup_channels_pooled(uct_rc_gdaki_iface_t *iface,
         return;
     }
 
+    /* Kicks off an async drain; the block is returned to the pool later,
+     * from uct_rc_gdaki_channel_cleanup_progress(), once every channel has
+     * drained. Only the ep's own reference is cleared here. */
     uct_rc_gdaki_channel_block_reset_qps(iface, ep->channel_block);
-    ucs_mpool_put(ep->channel_block);
     uct_rc_gdaki_ep_reset_channels(ep);
 }
 
@@ -1132,6 +1233,88 @@ static uct_iface_ops_t uct_rc_gdaki_iface_tl_ops = {
             ucs_empty_function_return_unsupported,
 };
 
+/* Creates a minimal (1-WQE), functionally-unused SRQ shared by all of this
+ * iface's pooled channels, purely so their QPs are SRQ-attached and
+ * therefore eligible for IBV_EVENT_QP_LAST_WQE_REACHED (see
+ * uct_rc_gdaki_channel_block_reset_qps). Deliberately does not reuse
+ * uct_rc_mlx5_devx_init_rx(), which sizes the SRQ from the real,
+ * user-configurable RX queue length and multi-packet-RQ fields gdaki has no
+ * use for -- this SRQ never has a WR posted to it. */
+static ucs_status_t uct_rc_gdaki_iface_create_srq(uct_rc_gdaki_iface_t *iface)
+{
+    uct_ib_mlx5_md_t *md   = uct_ib_mlx5_iface_md(&iface->super.super.super);
+    uct_ib_mlx5_srq_t *srq = &iface->super.rx.srq;
+    char in[UCT_IB_MLX5DV_ST_SZ_BYTES(create_rmp_in)]   = {};
+    char out[UCT_IB_MLX5DV_ST_SZ_BYTES(create_rmp_out)] = {};
+    int stride;
+    void *rmpc, *wq;
+    ucs_status_t status;
+
+    if (!(md->flags & UCT_IB_MLX5_MD_FLAG_RMP)) {
+        ucs_error("%s: gdaki requires RMP support for its drain-signaling SRQ",
+                  uct_ib_device_name(&md->super.dev));
+        return UCS_ERR_UNSUPPORTED;
+    }
+
+    stride = uct_ib_mlx5_srq_stride(1);
+    status = uct_ib_mlx5_md_buf_alloc(md, stride, 0, &srq->buf, &srq->devx.mem,
+                                      0, "gdaki srq buf");
+    if (status != UCS_OK) {
+        return status;
+    }
+
+    srq->devx.dbrec = uct_ib_mlx5_get_dbrec(md);
+    if (srq->devx.dbrec == NULL) {
+        status = UCS_ERR_NO_MEMORY;
+        goto err_free_buf;
+    }
+
+    srq->db = &srq->devx.dbrec->db[MLX5_RCV_DBR];
+
+    UCT_IB_MLX5DV_SET(create_rmp_in, in, opcode, UCT_IB_MLX5_CMD_OP_CREATE_RMP);
+    rmpc = UCT_IB_MLX5DV_ADDR_OF(create_rmp_in, in, rmp_context);
+    UCT_IB_MLX5DV_SET(rmpc, rmpc, state, UCT_IB_MLX5_RMPC_STATE_RDY);
+
+    wq = UCT_IB_MLX5DV_ADDR_OF(rmpc, rmpc, wq);
+    UCT_IB_MLX5DV_SET  (wq, wq, wq_type,       UCT_IB_MLX5_SRQ_TOPO_CYCLIC);
+    UCT_IB_MLX5DV_SET  (wq, wq, log_wq_sz,     0);
+    UCT_IB_MLX5DV_SET  (wq, wq, log_wq_stride, ucs_ilog2(stride));
+    UCT_IB_MLX5DV_SET  (wq, wq, pd,            uct_ib_mlx5_devx_md_get_pdn(md));
+    UCT_IB_MLX5DV_SET  (wq, wq, dbr_umem_id,   srq->devx.dbrec->mem_id);
+    UCT_IB_MLX5DV_SET64(wq, wq, dbr_addr,      srq->devx.dbrec->offset);
+    UCT_IB_MLX5DV_SET  (wq, wq, wq_umem_id,    srq->devx.mem.mem->umem_id);
+
+    srq->type = UCT_IB_MLX5_OBJ_TYPE_DEVX;
+    uct_ib_mlx5_srq_buff_init(srq, 0, 0, 0, 1);
+
+    srq->devx.obj = uct_ib_mlx5_devx_obj_create(md->super.dev.ibv_context, in,
+                                                sizeof(in), out, sizeof(out),
+                                                "gdaki SRQ",
+                                                UCS_LOG_LEVEL_ERROR);
+    if (srq->devx.obj == NULL) {
+        status = UCS_ERR_IO_ERROR;
+        goto err_cleanup_srq;
+    }
+
+    srq->srq_num = UCT_IB_MLX5DV_GET(create_rmp_out, out, rmpn);
+    return UCS_OK;
+
+err_cleanup_srq:
+    uct_rc_mlx5_devx_cleanup_srq(md, srq);
+    return status;
+
+err_free_buf:
+    uct_ib_mlx5_md_buf_free(md, srq->buf, &srq->devx.mem);
+    return status;
+}
+
+static void uct_rc_gdaki_iface_destroy_srq(uct_rc_gdaki_iface_t *iface)
+{
+    uct_ib_mlx5_md_t *md = uct_ib_mlx5_iface_md(&iface->super.super.super);
+
+    uct_rc_mlx5_destroy_srq(md, &iface->super.rx.srq);
+}
+
 static UCS_CLASS_INIT_FUNC(uct_rc_gdaki_iface_t, uct_md_h tl_md,
                            uct_worker_h worker,
                            const uct_iface_params_t *params,
@@ -1156,6 +1339,7 @@ static UCS_CLASS_INIT_FUNC(uct_rc_gdaki_iface_t, uct_md_h tl_md,
 
     self->num_channels = ucs_roundup_pow2(config->num_channels);
     self->ep_alloc_mode = config->ep_alloc_mode;
+    ucs_list_head_init(&self->channel_gc_list);
 
     status = uct_rc_mlx5_dp_ordering_ooo_init(md, &self->super,
                                               md->dp_ordering_cap_devx.rc,
@@ -1218,15 +1402,25 @@ static UCS_CLASS_INIT_FUNC(uct_rc_gdaki_iface_t, uct_md_h tl_md,
         goto err_lock;
     }
 
+    /* Both alloc modes need the SRQ to exist before
+     * uct_rc_gdaki_init_channel_chunk() first runs; direct mode simply
+     * never references it (see the srq_num assignment there). */
+    status = uct_rc_gdaki_iface_create_srq(self);
+    if (status != UCS_OK) {
+        goto err_pool;
+    }
+
     if (self->ep_alloc_mode == UCT_RC_GDAKI_EP_ALLOC_MODE_POOL) {
         status = uct_rc_gdaki_iface_init_channel_pool(self, config);
         if (status != UCS_OK) {
-            goto err_pool;
+            goto err_srq;
         }
     }
 
     return UCS_OK;
 
+err_srq:
+    uct_rc_gdaki_iface_destroy_srq(self);
 err_pool:
     pthread_mutex_destroy(&self->ep_init_lock);
 err_lock:
@@ -1241,9 +1435,17 @@ static UCS_CLASS_CLEANUP_FUNC(uct_rc_gdaki_iface_t)
     pthread_mutex_destroy(&self->ep_init_lock);
     ibv_dereg_mr(self->atomic_mr);
     ucs_free(self->atomic_buff);
+
+    /* Force-completes any channel still mid-drain; a no-op for direct mode,
+     * since nothing ever populates channel_gc_list there. Must run before
+     * pool/QP teardown below. */
+    uct_rc_gdaki_iface_cleanup_channels(self);
+
     if (self->ep_alloc_mode == UCT_RC_GDAKI_EP_ALLOC_MODE_POOL) {
         uct_rc_gdaki_iface_cleanup_channel_pool(self);
     }
+
+    uct_rc_gdaki_iface_destroy_srq(self);
 
     if (self->cuda_ctx != NULL) {
         (void)UCT_CUDADRV_FUNC_LOG_WARN(

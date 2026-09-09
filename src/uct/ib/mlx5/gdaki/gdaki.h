@@ -44,6 +44,12 @@ typedef struct uct_rc_gdaki_iface {
     unsigned                   ep_alloc_mode;
     pthread_mutex_t            ep_init_lock;
     ucs_mpool_t                channel_pool;
+    ucs_list_link_t            channel_gc_list; /* Pending
+        uct_rc_gdaki_channel_cleanup_ctx_t entries: channels moved to
+        IBV_QPS_ERR and awaiting IBV_EVENT_QP_LAST_WQE_REACHED (or awaiting
+        force-drain at iface cleanup). gdaki-owned analog of
+        uct_rc_iface_t::qp_gc_list, which gdaki cannot reuse directly since
+        uct_rc_gdaki_ep_t derives from uct_base_ep_t, not uct_rc_ep_t. */
 } uct_rc_gdaki_iface_t;
 
 
@@ -53,6 +59,36 @@ typedef struct uct_rc_gdaki_ep {
     uct_rc_gdaki_channel_block_mem_t mem;
     uct_rc_gdaki_channel_block_t     *channel_block;
 } uct_rc_gdaki_ep_t;
+
+
+/* Brackets exactly one IBV_QPS_ERR -> drain -> RESET -> INIT cycle of one
+ * physical channel (QP). Allocated fresh per cycle: register()/unregister()
+ * must be strictly paired per cycle, since gdaki reuses physical QPs across
+ * many endpoint lifetimes and uct_ib_device_async_event_register() asserts
+ * against double-registration while its "fired" flag is sticky. */
+typedef struct uct_rc_gdaki_channel_cleanup_ctx {
+    uct_ib_async_event_wait_t              super; /* MUST be the first field:
+        uct_ib_device_async_event_wait() schedules the callback with
+        arg == &this->super, and the callback reinterprets that pointer
+        directly as uct_rc_gdaki_channel_cleanup_ctx_t*. */
+    struct uct_rc_gdaki_block_cleanup_ctx *block;
+    uct_rc_gdaki_channel_t                *channel;
+    ucs_list_link_t                        list; /* membership in
+        iface->channel_gc_list */
+} uct_rc_gdaki_channel_cleanup_ctx_t;
+
+
+/* Shared state for one channel-block release-to-pool cycle: covers all
+ * iface->num_channels channels of one block. The block is only returned to
+ * the pool once every channel in it has independently drained. */
+typedef struct uct_rc_gdaki_block_cleanup_ctx {
+    uct_rc_gdaki_iface_t              *iface;
+    uct_rc_gdaki_channel_block_t      *channel_block;
+    unsigned                          pending; /* channels not yet drained;
+        reaches 0 -> ucs_mpool_put(channel_block) + free(this) */
+    uct_rc_gdaki_channel_cleanup_ctx_t channels[0]; /* iface->num_channels
+        entries, allocated together with this header */
+} uct_rc_gdaki_block_cleanup_ctx_t;
 
 ucs_status_t
 uct_gdaki_fill_cuda_tl_devices(const uct_ib_md_t *ib_md,
