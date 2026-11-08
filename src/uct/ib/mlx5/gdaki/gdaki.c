@@ -31,6 +31,7 @@
 #include <string.h>
 
 #include "gpunetio/common/doca_gpunetio_verbs_def.h"
+#include "gdaki_matrix.inl"
 
 #define UCT_GDAKI_MAX_CUDA_DEVICES 64
 
@@ -1454,7 +1455,9 @@ uct_gdaki_enum_gpus(uct_gdaki_gpu_info_t *gpus, unsigned *count_p)
             continue;
         }
 
-        status = ucs_topo_find_device_by_bus_id(&bus_id, &sys_dev);
+        /* Set the GPU class, as the CUDA devices have, so that the GPU is in
+         * the topology groups */
+        status = uct_cuda_find_device_by_bus_id(&bus_id, &sys_dev);
         if (status != UCS_OK) {
             return status;
         }
@@ -1740,6 +1743,105 @@ out:
     return num_planes;
 }
 
+static int uct_gdaki_dev_is_cx9(ucs_sys_device_t sys_dev)
+{
+    static const ucs_sys_pci_id_t cx9_pci_id = UCT_IB_DEVICE_PCI_ID_CX9;
+    ucs_sys_pci_id_t pci_id;
+
+    pci_id = ucs_topo_sys_device_get_pci_id(sys_dev);
+    return ucs_topo_pci_id_equal(&pci_id, &cx9_pci_id);
+}
+
+/*
+ * Assign the ConnectX-9 devices to the GPUs by HCA board, see
+ * uct_gdaki_board_assign(). The other devices are not assigned.
+ *
+ * Returns UCS_ERR_UNSUPPORTED, leaving the matrix as it is, if the devices are
+ * not the ConnectX-9 of a Vera Rubin system. Then the caller assigns them by
+ * the distance.
+ */
+static ucs_status_t
+uct_gdaki_dev_matrix_assign_boards(const uct_gdaki_gpu_info_t *gpus,
+                                   unsigned gpu_count,
+                                   uct_gdaki_dev_matrix_elem_t *dmat,
+                                   const uct_gdaki_dev_score_t *scores,
+                                   unsigned num_scores,
+                                   unsigned long max_per_gpu)
+{
+    ucs_sys_device_bitmap_t filter = UCS_STATIC_BITMAP_ZERO_INITIALIZER;
+    ucs_sys_device_t gpu_sys_devs[UCT_GDAKI_MAX_CUDA_DEVICES];
+    int cuda_idxs[UCT_GDAKI_MAX_CUDA_DEVICES];
+    uct_gdaki_board_dev_t *devs;
+    ucs_topo_groups_t groups;
+    unsigned num_devs, ibdev_index, i;
+    ucs_status_t status;
+
+    devs = ucs_calloc(num_scores, sizeof(*devs), "gdaki board devs");
+    if (devs == NULL) {
+        return UCS_ERR_NO_MEMORY;
+    }
+
+    num_devs = 0;
+    for (i = 0; i < num_scores; ++i) {
+        ibdev_index = scores[i].ibdev_index;
+        if (!uct_gdaki_dev_is_cx9(dmat[ibdev_index].sys_dev)) {
+            continue;
+        }
+
+        /* A direct NIC is the only device of its GPU */
+        if (dmat[ibdev_index].direct_nic) {
+            ucs_debug("ib device %u is a direct nic", ibdev_index);
+            status = UCS_ERR_UNSUPPORTED;
+            goto out_free;
+        }
+
+        devs[num_devs].sys_dev     = dmat[ibdev_index].sys_dev;
+        devs[num_devs].ibdev_index = ibdev_index;
+        UCS_STATIC_BITMAP_SET(&filter, devs[num_devs].sys_dev);
+        num_devs++;
+    }
+
+    if (num_devs == 0) {
+        status = UCS_ERR_UNSUPPORTED;
+        goto out_free;
+    }
+
+    if (ucs_topo_device_class_is_incomplete(UCS_TOPO_DEVICE_CLASS_ACC)) {
+        ucs_debug("not all gpus are in the topology");
+        status = UCS_ERR_UNSUPPORTED;
+        goto out_free;
+    }
+
+    status = ucs_topo_build_groups(&filter, &groups);
+    if (status != UCS_OK) {
+        goto out_free;
+    }
+
+    for (i = 0; i < gpu_count; ++i) {
+        gpu_sys_devs[i] = gpus[i].sys_dev;
+        cuda_idxs[i]    = gpus[i].cuda_idx;
+    }
+
+    status = uct_gdaki_board_assign(&groups, gpu_sys_devs, gpu_count, devs,
+                                    num_devs, max_per_gpu);
+    if (status == UCS_OK) {
+        for (i = 0; i < num_devs; ++i) {
+            dmat[devs[i].ibdev_index].cuda_map |=
+                    uct_gdaki_board_cuda_map(devs[i].gpu_mask, cuda_idxs,
+                                             gpu_count);
+        }
+
+        ucs_debug("assigned %u connectx-9 devices to %u gpus by board",
+                  num_devs, gpu_count);
+    }
+
+    ucs_topo_release_groups(&groups);
+
+out_free:
+    ucs_free(devs);
+    return status;
+}
+
 static uct_gdaki_dev_matrix_elem_t *
 uct_gdaki_dev_matrix_init(const uct_ib_md_t *ib_md, size_t *dmat_length_p)
 {
@@ -1857,6 +1959,17 @@ uct_gdaki_dev_matrix_init(const uct_ib_md_t *ib_md, size_t *dmat_length_p)
                                              scores, &fabric_ib_per_cuda);
     }
 
+    /* Without planes, give each GPU one HCA of each board if the devices are
+     * on such boards. The number of devices per GPU is the number of boards,
+     * unless a smaller number is configured. Otherwise, assign by the PCIe
+     * distance below. */
+    if ((num_planes == 0) && ib_md->config.gda_board_assign &&
+        (uct_gdaki_dev_matrix_assign_boards(gpus, gpu_count, dmat, scores,
+                                            num_sys_active_ibdevs,
+                                            ib_per_cuda) == UCS_OK)) {
+        goto out_assigned;
+    }
+
     if (ib_per_cuda == UCS_ULUNITS_AUTO) {
         ib_per_cuda = (num_planes > 0) ?
                       fabric_ib_per_cuda :
@@ -1931,6 +2044,7 @@ uct_gdaki_dev_matrix_init(const uct_ib_md_t *ib_md, size_t *dmat_length_p)
         }
     }
 
+out_assigned:
     /* Output processed device matrix length */
     *dmat_length_p = ibdev_count;
 

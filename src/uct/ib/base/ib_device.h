@@ -169,6 +169,10 @@ typedef struct uct_ib_device_spec {
 } uct_ib_device_spec_t;
 
 
+/* PCI identifier of ConnectX-9, as an initializer of ucs_sys_pci_id_t */
+#define UCT_IB_DEVICE_PCI_ID_CX9 {0x15b3, 4133}
+
+
 /**
  * Refcounted, TTL'd address handle cache entry.
  */

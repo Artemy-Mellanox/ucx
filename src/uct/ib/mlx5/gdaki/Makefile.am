@@ -37,7 +37,8 @@ nobase_dist_libuct_ib_mlx5_gda_la_HEADERS = \
 	gpunetio/device/doca_gpunetio_dev_verbs_cq.cuh
 
 noinst_HEADERS = \
-	gdaki.h
+	gdaki.h \
+	gdaki_matrix.inl
 
 PKG_CONFIG_NAME=ib-mlx5-gda
 

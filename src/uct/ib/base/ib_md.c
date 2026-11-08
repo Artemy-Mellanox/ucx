@@ -133,8 +133,18 @@ ucs_config_field_t uct_ib_md_config_table[] = {
      "so GPUs with different planes could not communicate. HCA devices which\n"
      "are not on a plane are not assigned to GPUs when planes are detected.\n"
      "If disabled, or if the network device of any HCA device is not known,\n"
-     "devices are assigned by PCIe distance only.",
+     "devices are assigned as if they were on a single network.",
      ucs_offsetof(uct_ib_md_config_t, ext.gda_fabric_detect),
+     UCS_CONFIG_TYPE_BOOL},
+
+    {"GDA_BOARD_ASSIGN", "y",
+     "If the HCA devices are not grouped to fabric planes, assign ConnectX-9\n"
+     "HCA devices to GPUs by HCA board. Each NUMA node of a Vera Rubin system\n"
+     "has two GPUs and four HCAs, which are on two boards of two HCAs with\n"
+     "consecutive PCI addresses. Each GPU gets one HCA of each board. If\n"
+     "disabled, or if the devices do not have this layout, devices are\n"
+     "assigned to GPUs by PCIe distance only.",
+     ucs_offsetof(uct_ib_md_config_t, ext.gda_board_assign),
      UCS_CONFIG_TYPE_BOOL},
 
     {"GDA_DMABUF_ENABLE", "try",
